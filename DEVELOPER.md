@@ -12,15 +12,14 @@ This document covers how to build, test, and extend `sdkvers`.
 ## Project structure
 
 ```
-rust/
-  Cargo.toml          — crate manifest (lib + binary)
-  src/
-    lib.rs            — all parsing, version comparison, and resolution logic
-    main.rs           — CLI entry point (sdkvers-resolve binary)
-  sdkvers-init.sh     — shell init script; defines the sdkvers() shell function
-  sdkvers-resolve     — POSIX sh launcher; selects and runs the platform binary
-  dist/               — assembled distribution tree (output of just dist)
-  justfile            — build recipes
+Cargo.toml          — crate manifest (lib + binary)
+src/
+  lib.rs            — all parsing, version comparison, and resolution logic
+  main.rs           — CLI entry point (sdkvers-resolve binary)
+sdkvers-init.sh     — shell init script; defines the sdkvers() shell function
+sdkvers-resolve     — POSIX sh launcher; selects and runs the platform binary
+dist/               — assembled distribution tree (output of just dist)
+justfile            — build recipes
 ```
 
 The crate builds one library (`sdkvers`) and one binary (`sdkvers-resolve`). All logic lives in `lib.rs`; `main.rs` is a thin CLI wrapper.
@@ -137,3 +136,13 @@ The binary exposes several subcommands that are useful during development and de
 | `parse-sdklist <candidate>` | Run `sdk list <candidate>` and display parsed output |
 
 Regular users only ever invoke `sdkvers` (the shell function). These subcommands exist for development and troubleshooting.
+
+## Releasing
+
+1. Update the version in `Cargo.toml`
+2. Run `cargo build` to update `Cargo.lock`
+3. Commit: `git commit -am "Release vX.Y.Z"`
+4. Tag: `git tag vX.Y.Z`
+5. Push: `git push && git push --tags`
+
+The release workflow will validate that the tag matches `Cargo.toml`, build all platform binaries, run tests, and publish a GitHub release with the binaries attached.
