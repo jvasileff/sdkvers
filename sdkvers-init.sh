@@ -1,3 +1,5 @@
+_sdkvers_init_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
 sdkvers() {
   local sdkvers_resolver
   local sdkvers_output
@@ -5,6 +7,8 @@ sdkvers() {
 
   if [ -n "${SDKVERS_HOME:-}" ] && [ -x "${SDKVERS_HOME}/sdkvers-resolve" ]; then
     sdkvers_resolver="${SDKVERS_HOME}/sdkvers-resolve"
+  elif [ -x "${_sdkvers_init_dir}/sdkvers-resolve" ]; then
+    sdkvers_resolver="${_sdkvers_init_dir}/sdkvers-resolve"
   else
     sdkvers_resolver="sdkvers-resolve"
   fi
