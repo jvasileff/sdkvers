@@ -30,10 +30,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+
       - uses: actions/download-artifact@v8
         with:
           name: sdkvers-dist
           path: dist/
+
+      - name: Restore executable permissions
+        run: chmod +x dist/sdkvers-resolve dist/sdkvers-resolve-*
 
       - name: Package
         run: |
@@ -41,11 +46,6 @@ jobs:
           mkdir "sdkvers-${version}"
           cp dist/* "sdkvers-${version}/"
           tar czf "sdkvers.tar.gz" "sdkvers-${version}/"
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: sdkvers-dist
-          path: sdkvers.tar.gz
 
       - name: Create release
         run: |

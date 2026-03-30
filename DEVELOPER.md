@@ -141,8 +141,9 @@ Regular users only ever invoke `sdkvers` (the shell function). These subcommands
 
 1. Update the version in `Cargo.toml`
 2. Run `cargo build` to update `Cargo.lock`
-3. Commit: `git commit -am "Release vX.Y.Z"`
-4. Tag: `git tag vX.Y.Z`
-5. Push: `git push && git push --tags`
+3. Set a shell variable for the steps below: `SDKVERS_VERSION=X.Y.Z`
+4. Commit: `git commit -am "Release v$SDKVERS_VERSION"`
+5. Tag: `git tag "v$SDKVERS_VERSION" -m "v$SDKVERS_VERSION"`
+6. Push: `git push && git push --tags`
 
 The release workflow will validate that the tag matches `Cargo.toml`, build all platform binaries, run tests, and publish a GitHub release with the binaries attached.
