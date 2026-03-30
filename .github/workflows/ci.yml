@@ -18,32 +18,11 @@ jobs:
       - name: Install cross
         run: cargo install cross@0.2.5
 
-      - name: Cache cross Docker images
-        id: cache-cross-images
-        uses: actions/cache@v5
-        with:
-          path: /tmp/cross-images
-          key: cross-docker-images-0.2.5
-
-      - name: Load cross Docker images
-        if: steps.cache-cross-images.outputs.cache-hit == 'true'
-        run: |
-          for f in /tmp/cross-images/*.tar; do docker load -i "$f"; done
-
       - name: Run tests
         run: just test
 
       - name: Build Linux binaries
         run: just dist-linux
-
-      - name: Save cross Docker images
-        if: steps.cache-cross-images.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p /tmp/cross-images
-          docker save ghcr.io/cross-rs/aarch64-unknown-linux-musl:0.2.5   -o /tmp/cross-images/aarch64-unknown-linux-musl.tar
-          docker save ghcr.io/cross-rs/x86_64-unknown-linux-musl:0.2.5    -o /tmp/cross-images/x86_64-unknown-linux-musl.tar
-          docker save ghcr.io/cross-rs/arm-unknown-linux-musleabihf:0.2.5  -o /tmp/cross-images/arm-unknown-linux-musleabihf.tar
-          docker save ghcr.io/cross-rs/armv7-unknown-linux-musleabihf:0.2.5 -o /tmp/cross-images/armv7-unknown-linux-musleabihf.tar
 
       - uses: actions/upload-artifact@v7
         with:
