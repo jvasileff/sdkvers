@@ -11,11 +11,12 @@
 
 ## Installation
 
-Download a release and place the files somewhere on your system, for example `~/.sdkvers`:
+Create `~/.sdkvers` and extract the latest release into it:
 
 ```sh
 mkdir -p ~/.sdkvers
-cp sdkvers-init.sh sdkvers-resolve sdkvers-resolve-* ~/.sdkvers/
+curl -L https://github.com/jvasileff/sdkvers/releases/latest/download/sdkvers.tar.gz \
+  | tar xz --strip-components=1 -C ~/.sdkvers
 ```
 
 Then add these two lines to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
@@ -26,6 +27,14 @@ export SDKVERS_HOME="$HOME/.sdkvers"
 ```
 
 Reload your shell or `source` the profile file to apply the changes.
+
+### macOS: removing quarantine
+
+If you downloaded the release via a browser instead of `curl`, macOS will quarantine the binaries and refuse to run them. Remove the quarantine attribute with:
+
+```sh
+xattr -dr com.apple.quarantine ~/.sdkvers
+```
 
 ## Usage
 
