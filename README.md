@@ -19,11 +19,10 @@ curl -L https://github.com/jvasileff/sdkvers/releases/latest/download/sdkvers.ta
   | tar xz --strip-components=1 -C ~/.sdkvers
 ```
 
-Then add these two lines to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+Then add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 
 ```sh
-export SDKVERS_HOME="$HOME/.sdkvers"
-. "$SDKVERS_HOME/sdkvers-init.sh"
+[ -f "$HOME/.sdkvers/sdkvers-init.sh" ] && . "$HOME/.sdkvers/sdkvers-init.sh"
 ```
 
 Reload your shell or `source` the profile file to apply the changes.
