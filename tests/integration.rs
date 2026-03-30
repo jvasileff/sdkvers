@@ -1,4 +1,5 @@
 use sdkvers::*;
+use std::path::PathBuf;
 
 #[test]
 #[ignore = "requires SDKMAN installation"]
@@ -28,6 +29,27 @@ fn resolves_installed_java_version() {
         .clone()
         .unwrap_or_else(|| first.version.clone());
     assert_eq!(resolved.target, expected_target);
+}
+
+#[test]
+#[ignore = "requires SDKMAN installation and network; run to regenerate fixtures"]
+fn capture_sdk_list_fixtures() {
+    let candidates = [
+        "java", "gradle", "maven", "kotlin", "scala",
+        "groovy", "ant", "springboot", "micronaut", "sbt",
+    ];
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/sdk_list");
+    std::fs::create_dir_all(&dir).unwrap();
+    for candidate in candidates {
+        match run_sdk_list(candidate) {
+            Ok(text) => {
+                std::fs::write(dir.join(format!("{candidate}.txt")), &text).unwrap();
+                println!("captured {candidate}");
+            }
+            Err(e) => eprintln!("skipping {candidate}: {e}"),
+        }
+    }
 }
 
 #[test]

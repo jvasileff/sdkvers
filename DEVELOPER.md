@@ -137,6 +137,27 @@ The binary exposes several subcommands that are useful during development and de
 
 Regular users only ever invoke `sdkvers` (the shell function). These subcommands exist for development and troubleshooting.
 
+## Regenerating sdk list fixtures
+
+The fixture files in `tests/fixtures/sdk_list/` are captured from a live SDKMAN installation and committed to the repository. Tests in `lib.rs` use these fixtures to validate the parsers and resolver against real data without needing SDKMAN installed.
+
+To regenerate all fixtures, run on a machine with SDKMAN and network access:
+
+```sh
+cargo test -- --ignored capture_sdk_list_fixtures
+```
+
+Optionally pre-install a few extra versions first to produce richer status markers in the output (installed rows exercise the resolver tests):
+
+```sh
+sdk install java 21.0.10-tem
+sdk install gradle 8.14.4
+sdk install kotlin 2.3.20
+sdk install scala 3.8.2
+```
+
+After capture, review the diff before committing. Fixtures change only when SDKMAN adds, removes, or renames candidates.
+
 ## Releasing
 
 1. Update the version in `Cargo.toml`

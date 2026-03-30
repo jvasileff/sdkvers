@@ -724,8 +724,8 @@ fn is_java_header_line(line: &str) -> bool {
 fn is_generic_grid_data_line(trimmed: &str) -> bool {
     !(trimmed.is_empty()
         || trimmed.starts_with('=')
-        || trimmed.starts_with('+')
-        || trimmed.starts_with('*')
+        || trimmed.starts_with("+ -")
+        || trimmed.starts_with("* -")
         || trimmed.starts_with("> -")
         || trimmed.starts_with("Available "))
 }
@@ -2114,6 +2114,301 @@ mod tests {
         assert_eq!(successes, 1);
         assert_eq!(errors, 1);
     }
+
+    // ---- parsing: sdk list (fixtures) ----
+
+    fn load_fixture(candidate: &str) -> SdkListNode {
+        let text = match candidate {
+            "java"       => include_str!("../tests/fixtures/sdk_list/java.txt"),
+            "gradle"     => include_str!("../tests/fixtures/sdk_list/gradle.txt"),
+            "maven"      => include_str!("../tests/fixtures/sdk_list/maven.txt"),
+            "kotlin"     => include_str!("../tests/fixtures/sdk_list/kotlin.txt"),
+            "scala"      => include_str!("../tests/fixtures/sdk_list/scala.txt"),
+            "groovy"     => include_str!("../tests/fixtures/sdk_list/groovy.txt"),
+            "ant"        => include_str!("../tests/fixtures/sdk_list/ant.txt"),
+            "springboot" => include_str!("../tests/fixtures/sdk_list/springboot.txt"),
+            "micronaut"  => include_str!("../tests/fixtures/sdk_list/micronaut.txt"),
+            "sbt"        => include_str!("../tests/fixtures/sdk_list/sbt.txt"),
+            other        => panic!("no fixture for {other}"),
+        };
+        parse_sdk_list(candidate, text)
+    }
+
+    /// Reset all statuses in a parsed SdkListNode, then mark specific identifiers
+    /// as installed. Used in resolver tests to simulate a clean installed state
+    /// without depending on what was actually installed at fixture capture time.
+    fn with_installed(mut sdk: SdkListNode, installed: &[&str], in_use: &str) -> SdkListNode {
+        for row in &mut sdk.rows {
+            row.status = None;
+            row.in_use = false;
+            let id = row.identifier.as_deref().unwrap_or(&row.version);
+            if id == in_use {
+                row.status = Some("current local only".to_string());
+                row.in_use = true;
+            } else if installed.contains(&id) {
+                row.status = Some("local only".to_string());
+            }
+        }
+        sdk
+    }
+
+    // Java pipe-table fixture tests
+
+    #[test]
+    fn java_fixture_parses_to_nonempty_list() {
+        assert!(!load_fixture("java").rows.is_empty());
+    }
+
+    #[test]
+    fn java_fixture_has_multiple_vendors() {
+        let sdk = load_fixture("java");
+        let vendor_count = sdk.rows.iter()
+            .filter_map(|r| r.vendor_label.as_deref())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert!(vendor_count >= 3, "expected at least 3 distinct vendors, got {vendor_count}");
+    }
+
+    #[test]
+    fn java_fixture_vendor_carries_down_to_all_rows() {
+        let sdk = load_fixture("java");
+        for row in &sdk.rows {
+            assert!(
+                row.vendor_label.is_some(),
+                "row {} {} has no vendor_label",
+                row.version,
+                row.dist.as_deref().unwrap_or("")
+            );
+        }
+    }
+
+    #[test]
+    fn java_fixture_identifiers_have_dist_suffix() {
+        let sdk = load_fixture("java");
+        for row in &sdk.rows {
+            if let Some(id) = &row.identifier {
+                assert!(
+                    id.contains('-'),
+                    "identifier {id:?} has no dist suffix"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn java_fixture_dist_matches_identifier_suffix() {
+        let sdk = load_fixture("java");
+        for row in &sdk.rows {
+            if let (Some(id), Some(dist)) = (&row.identifier, &row.dist) {
+                assert!(
+                    id.ends_with(&format!("-{dist}")),
+                    "identifier {id:?} does not end with -{dist}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn java_fixture_all_versions_parse() {
+        let sdk = load_fixture("java");
+        for row in &sdk.rows {
+            VersionParser::new(&row.version)
+                .parse_version()
+                .unwrap_or_else(|e| panic!("version {:?} failed to parse: {e}", row.version));
+        }
+    }
+
+    #[test]
+    fn java_fixture_installed_versions_detected() {
+        let sdk = load_fixture("java");
+        let installed: Vec<_> = sdk.rows.iter()
+            .filter(|r| r.status.is_some())
+            .collect();
+        assert!(
+            !installed.is_empty(),
+            "expected at least one installed row in java fixture"
+        );
+    }
+
+    #[test]
+    fn java_fixture_in_use_row_is_graalce_25() {
+        let sdk = load_fixture("java");
+        let in_use: Vec<_> = sdk.rows.iter().filter(|r| r.in_use).collect();
+        assert_eq!(in_use.len(), 1, "expected exactly one in-use row");
+        assert_eq!(in_use[0].version, "25.0.2");
+        assert_eq!(in_use[0].dist.as_deref(), Some("graalce"));
+    }
+
+    // Grid-format fixture tests
+
+    #[test]
+    fn gradle_fixture_parses_to_nonempty_list() {
+        assert!(!load_fixture("gradle").rows.is_empty());
+    }
+
+    #[test]
+    fn gradle_fixture_rows_have_no_dist() {
+        let sdk = load_fixture("gradle");
+        for row in &sdk.rows {
+            assert!(row.dist.is_none(), "gradle row {} unexpectedly has dist", row.version);
+        }
+    }
+
+    #[test]
+    fn gradle_fixture_all_versions_parse() {
+        let sdk = load_fixture("gradle");
+        for row in &sdk.rows {
+            VersionParser::new(&row.version)
+                .parse_version()
+                .unwrap_or_else(|e| panic!("gradle version {:?} failed to parse: {e}", row.version));
+        }
+    }
+
+    #[test]
+    fn gradle_fixture_installed_versions_detected() {
+        let sdk = load_fixture("gradle");
+        // 9.4.1 was current+installed and 8.14.4 was installed at capture time
+        let installed: Vec<_> = sdk.rows.iter()
+            .filter(|r| r.status.is_some())
+            .collect();
+        assert!(
+            installed.len() >= 2,
+            "expected at least 2 installed gradle versions, got {}",
+            installed.len()
+        );
+    }
+
+    #[test]
+    fn maven_fixture_parses_to_nonempty_list() {
+        assert!(!load_fixture("maven").rows.is_empty());
+    }
+
+    #[test]
+    fn maven_fixture_all_versions_parse() {
+        let sdk = load_fixture("maven");
+        for row in &sdk.rows {
+            VersionParser::new(&row.version)
+                .parse_version()
+                .unwrap_or_else(|e| panic!("maven version {:?} failed to parse: {e}", row.version));
+        }
+    }
+
+    #[test]
+    fn kotlin_fixture_parses_to_nonempty_list() {
+        assert!(!load_fixture("kotlin").rows.is_empty());
+    }
+
+    #[test]
+    fn kotlin_fixture_all_versions_parse() {
+        let sdk = load_fixture("kotlin");
+        for row in &sdk.rows {
+            VersionParser::new(&row.version)
+                .parse_version()
+                .unwrap_or_else(|e| panic!("kotlin version {:?} failed to parse: {e}", row.version));
+        }
+    }
+
+    #[test]
+    fn scala_fixture_parses_to_nonempty_list() {
+        assert!(!load_fixture("scala").rows.is_empty());
+    }
+
+    #[test]
+    fn scala_fixture_all_versions_parse() {
+        let sdk = load_fixture("scala");
+        for row in &sdk.rows {
+            VersionParser::new(&row.version)
+                .parse_version()
+                .unwrap_or_else(|e| panic!("scala version {:?} failed to parse: {e}", row.version));
+        }
+    }
+
+    // Cross-cutting fixture tests
+
+    #[test]
+    fn all_fixture_candidates_parse_to_nonempty_lists() {
+        let candidates = [
+            "java", "gradle", "maven", "kotlin", "scala",
+            "groovy", "ant", "springboot", "micronaut", "sbt",
+        ];
+        for candidate in candidates {
+            let sdk = load_fixture(candidate);
+            assert!(
+                !sdk.rows.is_empty(),
+                "fixture for {candidate} parsed to empty list"
+            );
+        }
+    }
+
+    #[test]
+    fn all_grid_fixture_versions_are_parseable() {
+        let candidates = [
+            "gradle", "maven", "kotlin", "scala",
+            "groovy", "ant", "springboot", "micronaut", "sbt",
+        ];
+        for candidate in candidates {
+            let sdk = load_fixture(candidate);
+            for row in &sdk.rows {
+                VersionParser::new(&row.version)
+                    .parse_version()
+                    .unwrap_or_else(|e| panic!(
+                        "{candidate} version {:?} failed to parse: {e}", row.version
+                    ));
+            }
+        }
+    }
+
+    // Resolver integration tests against fixtures
+
+    #[test]
+    fn resolve_gradle_range_against_fixture() {
+        // 8.14.4 was installed at capture time; range [8,9) should select it
+        let sdk = load_fixture("gradle");
+        let line = make_line("gradle = [8,9)");
+        let resolved = Resolver.resolve_line(&line, &sdk).unwrap();
+        assert!(
+            resolved.target.starts_with("8."),
+            "expected an 8.x version, got {:?}",
+            resolved.target
+        );
+    }
+
+    #[test]
+    fn resolve_maven_range_against_fixture() {
+        // 3.9.14 was installed at capture time; range [3.9,4) should select it
+        let sdk = load_fixture("maven");
+        let line = make_line("maven = [3.9,4)");
+        let resolved = Resolver.resolve_line(&line, &sdk).unwrap();
+        assert!(
+            resolved.target.starts_with("3.9"),
+            "expected a 3.9.x version, got {:?}",
+            resolved.target
+        );
+    }
+
+    #[test]
+    fn resolve_java_exact_version_against_fixture() {
+        // 21.0.10-tem was installed at capture time
+        let sdk = load_fixture("java");
+        let line = make_line("java = [21.0.10] tem");
+        let resolved = Resolver.resolve_line(&line, &sdk).unwrap();
+        assert_eq!(resolved.target, "21.0.10-tem");
+    }
+
+    #[test]
+    fn resolve_against_fixture_using_with_installed() {
+        // with_installed() allows resolver tests that don't depend on what was installed at
+        // fixture capture time — useful for testing against arbitrary versions in the list
+        let sdk = with_installed(load_fixture("gradle"), &["8.7", "9.4.1"], "9.4.1");
+        let line = make_line("gradle = [8,9)");
+        let resolved = Resolver.resolve_line(&line, &sdk).unwrap();
+        assert_eq!(resolved.target, "8.7");
+    }
+
+    // ---- TODO: suggest install ----
+    // Tests for find_best_uninstalled() will live here.
+    // Fixtures contain many rows with status: None (available but not installed).
+    // Use load_fixture("gradle") etc. to test against real uninstalled version lists.
 
     // ---- project discovery ----
 
