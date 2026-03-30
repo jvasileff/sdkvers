@@ -1,0 +1,65 @@
+#!/bin/sh
+
+# Prints the Rust target triple for the current platform.
+_sdkvers_triple() {
+  os=$(uname -s 2>/dev/null || true)
+  arch=$(uname -m 2>/dev/null || true)
+
+  case "$os:$arch" in
+    Linux:aarch64)    printf '%s\n' 'aarch64-linux-musl' ;;
+    Linux:x86_64)     printf '%s\n' 'x86_64-linux-musl' ;;
+    Linux:armv7l)     printf '%s\n' 'armv7-linux-musleabihf' ;;
+    Linux:armv6l|Linux:armv5l|Linux:arm)
+                      printf '%s\n' 'arm-linux-musleabihf' ;;
+    Darwin:arm64)     printf '%s\n' 'arm64-apple-darwin' ;;
+    Darwin:x86_64)    printf '%s\n' 'x86_64-apple-darwin' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Resolves the absolute path of this script. When invoked without a directory
+# component (i.e. via PATH lookup), walks PATH to find ourselves.
+_sdkvers_script_path() {
+  case "$0" in
+    */*)
+      printf '%s\n' "$0"
+      return
+      ;;
+  esac
+
+  old_ifs=$IFS
+  IFS=:
+  for dir in $PATH; do
+    [ -z "$dir" ] && dir=.
+    if [ -x "$dir/$0" ]; then
+      printf '%s\n' "$dir/$0"
+      IFS=$old_ifs
+      return
+    fi
+  done
+  IFS=$old_ifs
+  return 1
+}
+
+_sdkvers_script_dir() {
+  script_path=$(_sdkvers_script_path) || return 1
+  CDPATH= cd -- "$(dirname -- "$script_path")" && pwd
+}
+
+triple=$(_sdkvers_triple) || {
+  printf '%s\n' 'error: unsupported platform' >&2
+  exit 1
+}
+
+script_dir=$(_sdkvers_script_dir) || {
+  printf '%s\n' 'error: could not determine sdkvers-resolve directory' >&2
+  exit 1
+}
+
+binary="$script_dir/sdkvers-resolve-$triple"
+if [ ! -x "$binary" ]; then
+  printf 'error: could not locate resolver binary: %s\n' "$binary" >&2
+  exit 1
+fi
+
+exec "$binary" "$@"
