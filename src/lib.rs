@@ -1275,7 +1275,7 @@ pub fn find_sdkvers_path(start_path: &str) -> Result<String> {
     };
     loop {
         let candidate = current.join(".sdkvers");
-        if candidate.exists() {
+        if candidate.is_file() {
             return Ok(candidate.to_string_lossy().to_string());
         }
         if !current.pop() {
@@ -2139,6 +2139,18 @@ mod tests {
         let temp_root = env::temp_dir().join(format!("sdkvers-test-nofile-{}", std::process::id()));
         let nested = temp_root.join("a");
         fs::create_dir_all(&nested).unwrap();
+        let result = find_sdkvers_path(nested.to_string_lossy().as_ref());
+        let _ = fs::remove_dir_all(&temp_root);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ignores_sdkvers_directory_in_ancestor() {
+        let temp_root = env::temp_dir().join(format!("sdkvers-test-dir-{}", std::process::id()));
+        let nested = temp_root.join("a");
+        fs::create_dir_all(&nested).unwrap();
+        // Create a .sdkvers directory (not a file) in the ancestor — should be ignored.
+        fs::create_dir_all(temp_root.join(".sdkvers")).unwrap();
         let result = find_sdkvers_path(nested.to_string_lossy().as_ref());
         let _ = fs::remove_dir_all(&temp_root);
         assert!(result.is_err());
