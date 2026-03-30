@@ -2,6 +2,7 @@ use sdkvers::{
     ConfigLineParser, Resolver, VersionParser, dump_config_line, dump_document, dump_sdk_list,
     dump_version, dump_version_expr, find_sdkvers_path, load_local_sdk_list, parse_document,
     parse_sdk_list, read_utf8_file, resolve_document_with_details, run_sdk_list, self_test,
+    suggest_install,
 };
 use std::process::ExitCode;
 
@@ -159,8 +160,15 @@ fn run() -> Result<(), String> {
                 }
                 let line = ConfigLineParser::new(line_text, 1).parse_line().map_err(|e| e.0)?;
                 let sdk = load_local_sdk_list(&line.candidate).map_err(|e| e.0)?;
-                let row = resolver.resolve_line(&line, &sdk).map_err(|e| e.0)?;
-                println!("sdk use {} {}", row.candidate, row.target);
+                match resolver.resolve_line(&line, &sdk) {
+                    Ok(row) => println!("sdk use {} {}", row.candidate, row.target),
+                    Err(e) => {
+                        if let Some(hint) = suggest_install(&line) {
+                            eprintln!("hint: {hint}");
+                        }
+                        return Err(e.0);
+                    }
+                }
             }
         }
         "resolve-file" => {

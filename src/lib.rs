@@ -963,6 +963,33 @@ impl Resolver {
         })
     }
 
+    pub fn find_best_uninstalled(
+        &self,
+        line: &ConfigLineNode,
+        sdk: &SdkListNode,
+    ) -> Result<Option<SdkListRow>> {
+        let mut best: Option<&SdkListRow> = None;
+        for row in &sdk.rows {
+            if Self::is_local_status(row.status.as_deref()) {
+                continue;
+            }
+            if !self.vendor_matches(line, row) {
+                continue;
+            }
+            if !self.version_expr_matches(&line.expr, &row.version)? {
+                continue;
+            }
+            if let Some(current_best) = best {
+                if self.compare_versions(&row.version, &current_best.version)? > 0 {
+                    best = Some(row);
+                }
+            } else {
+                best = Some(row);
+            }
+        }
+        Ok(best.cloned())
+    }
+
     fn is_local_status(status: Option<&str>) -> bool {
         matches!(
             status,
@@ -1296,6 +1323,62 @@ pub fn resolve_document(path: &str) -> Result<Vec<String>> {
     }
 }
 
+pub fn suggest_install(line: &ConfigLineNode) -> Option<String> {
+    let text = run_sdk_list(&line.candidate).ok()?;
+    let sdk = parse_sdk_list(&line.candidate, &text);
+    let row = find_best_uninstalled_for_suggestion(line, &sdk);
+    match row.ok()? {
+        Some(row) => {
+            let id = row.identifier.unwrap_or(row.version);
+            Some(format!("try: sdk install {} {}", line.candidate, id))
+        }
+        None => Some(format!(
+            "{} {} is not available via SDKMAN; check: sdk list {}",
+            line.candidate,
+            line.expr.source(),
+            line.candidate,
+        )),
+    }
+}
+
+// For java with no explicit vendor, prefer vendors the user already has installed
+// so the suggestion stays within their established toolchain. Falls back to all
+// vendors if no match exists within installed vendors.
+fn find_best_uninstalled_for_suggestion(
+    line: &ConfigLineNode,
+    sdk: &SdkListNode,
+) -> Result<Option<SdkListRow>> {
+    if line.candidate == "java" && line.vendor.is_none() {
+        let local = load_local_sdk_list("java").unwrap_or_else(|_| SdkListNode {
+            candidate: "java".to_string(),
+            rows: vec![],
+        });
+        let installed_dists: std::collections::HashSet<String> =
+            local.rows.iter().filter_map(|r| r.dist.clone()).collect();
+        if !installed_dists.is_empty() {
+            let filtered = SdkListNode {
+                candidate: sdk.candidate.clone(),
+                rows: sdk
+                    .rows
+                    .iter()
+                    .filter(|r| {
+                        r.dist
+                            .as_ref()
+                            .map(|d| installed_dists.contains(d))
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect(),
+            };
+            let result = Resolver.find_best_uninstalled(line, &filtered)?;
+            if result.is_some() {
+                return Ok(result);
+            }
+        }
+    }
+    Resolver.find_best_uninstalled(line, sdk)
+}
+
 pub fn resolve_document_with_details(path: &str) -> Result<(Vec<String>, Vec<String>)> {
     let document = parse_document(&read_utf8_file(path)?);
     let mut cache: HashMap<String, SdkListNode> = HashMap::new();
@@ -1303,20 +1386,35 @@ pub fn resolve_document_with_details(path: &str) -> Result<(Vec<String>, Vec<Str
     let mut commands = Vec::new();
     let mut errors = Vec::new();
     for entry in document.entries {
-        match ConfigLineParser::new(&entry.source, entry.line_number)
-            .parse_line()
-            .and_then(|config| {
-                let sdk_list = if let Some(existing) = cache.get(&config.candidate) {
-                    existing.clone()
-                } else {
-                    let parsed = load_local_sdk_list(&config.candidate)?;
+        let config = match ConfigLineParser::new(&entry.source, entry.line_number).parse_line() {
+            Ok(c) => c,
+            Err(e) => {
+                errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path));
+                continue;
+            }
+        };
+        let sdk_list = match cache.get(&config.candidate) {
+            Some(existing) => existing.clone(),
+            None => match load_local_sdk_list(&config.candidate) {
+                Ok(parsed) => {
                     cache.insert(config.candidate.clone(), parsed.clone());
                     parsed
-                };
-                resolver.resolve_line(&config, &sdk_list)
-            }) {
+                }
+                Err(e) => {
+                    errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path));
+                    continue;
+                }
+            },
+        };
+        match resolver.resolve_line(&config, &sdk_list) {
             Ok(row) => commands.push(format!("sdk use {} {}", row.candidate, row.target)),
-            Err(e) => errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path)),
+            Err(e) => {
+                let mut msg = format!("error: {} (line {} in {})", e.0, entry.line_number, path);
+                if let Some(hint) = suggest_install(&config) {
+                    msg.push_str(&format!("\nhint: {hint}"));
+                }
+                errors.push(msg);
+            }
         }
     }
     Ok((commands, errors))
@@ -2405,10 +2503,44 @@ mod tests {
         assert_eq!(resolved.target, "8.7");
     }
 
-    // ---- TODO: suggest install ----
-    // Tests for find_best_uninstalled() will live here.
-    // Fixtures contain many rows with status: None (available but not installed).
-    // Use load_fixture("gradle") etc. to test against real uninstalled version lists.
+    // ---- suggest install ----
+
+    #[test]
+    fn find_best_uninstalled_returns_best_matching_gradle() {
+        // gradle fixture: 9.4.1 (current) and 8.14.4 are installed; other 8.x are not
+        let sdk = load_fixture("gradle");
+        let line = make_line("gradle = [8,9)");
+        let row = Resolver.find_best_uninstalled(&line, &sdk).unwrap().unwrap();
+        assert!(row.version.starts_with("8."), "expected 8.x, got {}", row.version);
+        assert_ne!(row.version, "8.14.4"); // that one is installed
+    }
+
+    #[test]
+    fn find_best_uninstalled_returns_none_when_no_version_matches() {
+        let sdk = load_fixture("gradle");
+        let line = make_line("gradle = 0.0.0-nonexistent");
+        assert!(Resolver.find_best_uninstalled(&line, &sdk).unwrap().is_none());
+    }
+
+    #[test]
+    fn find_best_uninstalled_skips_installed_rows() {
+        let mut sdk = load_fixture("gradle");
+        for row in &mut sdk.rows {
+            row.status = Some("local only".to_string());
+        }
+        let line = make_line("gradle = [8,9)");
+        assert!(Resolver.find_best_uninstalled(&line, &sdk).unwrap().is_none());
+    }
+
+    #[test]
+    fn find_best_uninstalled_maven_range() {
+        // maven fixture: 3.9.14 installed (current); 3.9.x others are uninstalled
+        let sdk = load_fixture("maven");
+        let line = make_line("maven = [3.9,4)");
+        let row = Resolver.find_best_uninstalled(&line, &sdk).unwrap().unwrap();
+        assert!(row.version.starts_with("3.9."), "expected 3.9.x, got {}", row.version);
+        assert_ne!(row.version, "3.9.14"); // that one is installed
+    }
 
     // ---- project discovery ----
 
