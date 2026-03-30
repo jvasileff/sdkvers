@@ -124,3 +124,7 @@ java = [21,) graalce  # GraalVM CE, any 21+
 Vendor matching is case-sensitive and exact.
 
 For full details on version comparison and range semantics, see [SPEC.md](SPEC.md).
+
+## Authorship
+
+The code in this project was mostly written by AI, with heavy design collaboration with the author.
