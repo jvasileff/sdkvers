@@ -20,8 +20,8 @@ sdkvers() {
   sdkvers_exit=$?
 
   if [ $sdkvers_exit -eq 0 ]; then
-    eval "$(printf '%s' "$sdkvers_output" | "$sdkvers_resolver" extract eval)"
-    printf '%s' "$sdkvers_output" | "$sdkvers_resolver" extract stdout
+    eval "$(printf '%s' "$sdkvers_output" | "$sdkvers_resolver" internal extract eval)"
+    printf '%s' "$sdkvers_output" | "$sdkvers_resolver" internal extract stdout
   fi
 
   return $sdkvers_exit
