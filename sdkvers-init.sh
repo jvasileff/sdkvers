@@ -13,10 +13,16 @@ sdkvers() {
     sdkvers_resolver="sdkvers-resolve"
   fi
 
-  # Capture output and exit code separately so that any successful sdk use
-  # commands are evaluated even when some candidates fail to resolve.
-  sdkvers_output=$("$sdkvers_resolver" resolve-project "$@")
+  # Run the shell-function backend.  All output is structured three-section
+  # format (eval / stdout / stderr) separated by a UUID sentinel line.
+  # Parsing is delegated back to the binary via the extract subcommand.
+  sdkvers_output=$("$sdkvers_resolver" sdkvers "$@")
   sdkvers_exit=$?
-  eval "$sdkvers_output"
+
+  if [ $sdkvers_exit -eq 0 ]; then
+    eval "$(printf '%s' "$sdkvers_output" | "$sdkvers_resolver" extract eval)"
+    printf '%s' "$sdkvers_output" | "$sdkvers_resolver" extract stdout
+  fi
+
   return $sdkvers_exit
 }

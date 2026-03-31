@@ -787,6 +787,48 @@ pub fn load_local_sdk_list(candidate: &str) -> Result<SdkListNode> {
     })
 }
 
+pub fn list_sdkman_candidates() -> Result<Vec<String>> {
+    let candidates_path = sdkman_candidates_path()?;
+    if !candidates_path.exists() {
+        return Ok(vec![]);
+    }
+    let mut names = Vec::new();
+    for entry in fs::read_dir(&candidates_path)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == "current" {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+pub fn bootstrap_sdkvers_content() -> Result<String> {
+    let candidates = list_sdkman_candidates()?;
+    if candidates.is_empty() {
+        return Err(err("no SDKMAN candidates found"));
+    }
+    let mut lines = Vec::new();
+    for candidate in &candidates {
+        let sdk = load_local_sdk_list(candidate)?;
+        if let Some(row) = sdk.rows.iter().find(|r| r.in_use) {
+            let line = match &row.dist {
+                Some(dist) => format!("{} = {} {}", candidate, row.version, dist),
+                None => format!("{} = {}", candidate, row.version),
+            };
+            lines.push(line);
+        }
+    }
+    if lines.is_empty() {
+        return Err(err("no active SDKMAN versions found"));
+    }
+    Ok(lines.join("\n") + "\n")
+}
+
 fn sdkman_candidates_path() -> Result<PathBuf> {
     if let Ok(dir) = env::var("SDKMAN_DIR") {
         return Ok(Path::new(&dir).join("candidates"));
