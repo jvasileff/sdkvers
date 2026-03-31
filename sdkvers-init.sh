@@ -19,7 +19,10 @@ sdkvers() {
   sdkvers_output=$("$sdkvers_resolver" sdkvers "$@")
   sdkvers_exit=$?
 
-  if [ $sdkvers_exit -eq 0 ]; then
+  # Some subcommands (e.g. selfupdate) produce no stdout intentionally and
+  # rely on this guard to skip the extract/eval steps, avoiding any
+  # dependency on the internal protocol across binary versions.
+  if [ $sdkvers_exit -eq 0 ] && [ -n "$sdkvers_output" ]; then
     eval "$(printf '%s' "$sdkvers_output" | "$sdkvers_resolver" internal extract eval)"
     printf '%s' "$sdkvers_output" | "$sdkvers_resolver" internal extract stdout
   fi

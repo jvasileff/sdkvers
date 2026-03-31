@@ -122,6 +122,7 @@ fn fn_help_text() -> &'static str {
         "Run in a project directory to activate the versions in .sdkvers.\n",
         "\n",
         "  bootstrap [--directory <dir>]    create .sdkvers from active SDKMAN versions\n",
+        "  selfupdate [check|force]         update sdkvers to the latest release\n",
         "  help                             show this message\n",
     )
 }
@@ -309,6 +310,7 @@ fn run_fn(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         None => run_fn_resolve(&uuid),
         Some("bootstrap") => run_fn_bootstrap(&args[1..], &uuid),
+        Some("selfupdate") => run_fn_selfupdate(&args[1..]),
         Some("help") => {
             let mut out = FnOutput::new();
             out.stdout = fn_help_text().to_string();
@@ -370,6 +372,220 @@ fn run_fn_bootstrap(args: &[String], uuid: &str) -> Result<(), String> {
     out.stdout = format!("wrote {}\n", target.display());
     out.write(uuid);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// `selfupdate` subcommand
+// ---------------------------------------------------------------------------
+
+// selfupdate writes only to stderr and produces no stdout.  The shell
+// function skips the extract/eval steps when stdout is empty, so the new
+// binary is never asked to parse output from the old binary.  This avoids
+// breakage when the internal protocol changes across versions.
+fn run_fn_selfupdate(args: &[String]) -> Result<(), String> {
+    let (check_only, force) = match args.first().map(String::as_str) {
+        None => (false, false),
+        Some("check") => (true, false),
+        Some("force") => (false, true),
+        Some(other) => return Err(format!("unexpected argument: {other}")),
+    };
+
+    let install_dir = resolve_install_dir()?;
+
+    eprintln!("checking for updates...");
+    let latest = fetch_latest_version()?;
+    let current = env!("CARGO_PKG_VERSION");
+
+    let latest_sv = parse_semver(&latest)
+        .ok_or_else(|| format!("unexpected version format from GitHub: {latest}"))?;
+    let current_sv = parse_semver(current)
+        .ok_or_else(|| format!("unexpected current version format: {current}"))?;
+
+    if latest_sv <= current_sv && !force {
+        eprintln!("sdkvers {current} is up to date");
+        return Ok(());
+    }
+
+    if latest_sv > current_sv {
+        eprintln!("update available: {current} \u{2192} {latest}");
+    }
+
+    if check_only {
+        eprintln!("run 'sdkvers selfupdate' to apply");
+        return Ok(());
+    }
+
+    download_and_install(&latest, &install_dir)?;
+    eprintln!("updated to {latest}");
+    eprintln!("to complete the update, run: . {}", install_dir.join("sdkvers-init.sh").display());
+    Ok(())
+}
+
+fn resolve_install_dir() -> Result<std::path::PathBuf, String> {
+    // A: $SDKVERS_HOME if set, else ~/.sdkvers
+    let home_base = std::env::var("SDKVERS_HOME").ok().unwrap_or_else(|| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{home}/.sdkvers")
+    });
+    let a = std::fs::canonicalize(&home_base)
+        .map_err(|e| format!("cannot resolve install directory '{home_base}': {e}"))?;
+
+    // B: directory containing the running binary
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot determine executable path: {e}"))?;
+    let exe_dir = exe
+        .parent()
+        .ok_or_else(|| "executable has no parent directory".to_string())?;
+    let b = std::fs::canonicalize(exe_dir)
+        .map_err(|e| format!("cannot resolve executable directory: {e}"))?;
+
+    if a != b {
+        return Err(format!(
+            "install directory mismatch: '{}' (from $SDKVERS_HOME/default) vs '{}' (from executable path)",
+            a.display(),
+            b.display()
+        ));
+    }
+
+    Ok(a)
+}
+
+fn fetch_latest_version() -> Result<String, String> {
+    let output = std::process::Command::new("curl")
+        .args([
+            "--silent",
+            "--location",
+            "--fail",
+            "https://api.github.com/repos/jvasileff/sdkvers/releases/latest",
+        ])
+        .output()
+        .map_err(|e| format!("failed to run curl: {e}"))?;
+
+    if !output.status.success() {
+        return Err("failed to fetch release info from GitHub".to_string());
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    let tag = extract_json_string_field(&body, "tag_name")
+        .ok_or_else(|| "could not parse release version from GitHub response".to_string())?
+        .to_owned();
+    let version = tag.strip_prefix('v').unwrap_or(&tag).to_owned();
+    Ok(version)
+}
+
+fn extract_json_string_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
+    let needle = format!("\"{field}\"");
+    let start = json.find(needle.as_str())?;
+    let after_key = json[start + needle.len()..].trim_start();
+    let after_colon = after_key.strip_prefix(':')?;
+    let after_ws = after_colon.trim_start();
+    let content = after_ws.strip_prefix('"')?;
+    let end = content.find('"')?;
+    Some(&content[..end])
+}
+
+fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
+    // Strip pre-release suffix (e.g. "-dev") and build metadata (e.g. "+build")
+    let v = v.split('-').next().unwrap_or(v);
+    let v = v.split('+').next().unwrap_or(v);
+    let mut parts = v.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    let patch: u32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+fn download_and_install(version: &str, install_dir: &Path) -> Result<(), String> {
+    let url = format!(
+        "https://github.com/jvasileff/sdkvers/releases/download/v{version}/sdkvers.tar.gz"
+    );
+
+    let tmp_dir = create_temp_dir()?;
+
+    let result = (|| {
+        let tarball = tmp_dir.join("sdkvers.tar.gz");
+
+        eprintln!("downloading sdkvers {version}...");
+        let status = std::process::Command::new("curl")
+            .args(["--silent", "--location", "--fail", "--output"])
+            .arg(&tarball)
+            .arg(&url)
+            .status()
+            .map_err(|e| format!("failed to run curl: {e}"))?;
+        if !status.success() {
+            return Err(format!("download failed: {url}"));
+        }
+
+        let status = std::process::Command::new("tar")
+            .args(["-xzf"])
+            .arg(&tarball)
+            .arg("-C")
+            .arg(&tmp_dir)
+            .status()
+            .map_err(|e| format!("failed to run tar: {e}"))?;
+        if !status.success() {
+            return Err("failed to extract update archive".to_string());
+        }
+
+        let extracted_dir = tmp_dir.join(format!("sdkvers-{version}"));
+        if !extracted_dir.is_dir() {
+            return Err(format!(
+                "expected directory not found after extraction: {}",
+                extracted_dir.display()
+            ));
+        }
+
+        eprintln!("installing...");
+        let entries = std::fs::read_dir(&extracted_dir)
+            .map_err(|e| format!("failed to read extracted archive: {e}"))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("failed to read archive entry: {e}"))?;
+            let src = entry.path();
+            let Some(filename) = src.file_name() else {
+                continue;
+            };
+            let dst = install_dir.join(filename);
+            // Write to a .new temp file then rename atomically so the running
+            // binary's inode is preserved until the rename completes.
+            let dst_tmp = install_dir.join(format!("{}.new", filename.to_string_lossy()));
+
+            let perms = std::fs::metadata(&src)
+                .map_err(|e| format!("failed to stat {}: {e}", src.display()))?
+                .permissions();
+
+            std::fs::copy(&src, &dst_tmp).map_err(|e| {
+                format!("failed to copy {}: {e}", filename.to_string_lossy())
+            })?;
+            std::fs::set_permissions(&dst_tmp, perms).map_err(|e| {
+                format!("failed to set permissions on {}: {e}", filename.to_string_lossy())
+            })?;
+            std::fs::rename(&dst_tmp, &dst).map_err(|e| {
+                format!("failed to install {}: {e}", filename.to_string_lossy())
+            })?;
+        }
+
+        Ok(())
+    })();
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    result
+}
+
+fn create_temp_dir() -> Result<std::path::PathBuf, String> {
+    use std::io::Read;
+    let mut b = [0u8; 8];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut b))
+        .map_err(|e| format!("failed to create temp directory: {e}"))?;
+    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    let dir = std::env::temp_dir().join(format!("sdkvers-update-{hex}"));
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("failed to create temp directory: {e}"))?;
+    Ok(dir)
 }
 
 // ---------------------------------------------------------------------------
