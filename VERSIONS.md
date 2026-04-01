@@ -1,6 +1,6 @@
 # sdkvers release notes
 
-## v1.1.0 (unreleased)
+## v1.1.0
 
 ### New features
 
