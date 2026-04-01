@@ -1,14 +1,9 @@
-[package]
-name = "sdkvers"
-version = "1.1.0"
-edition = "2024"
-authors = ["John Vasileff"]
-license = "MIT"
-
-[lib]
-name = "sdkvers"
-path = "src/lib.rs"
-
-[[bin]]
-name = "sdkvers-resolve"
-path = "src/main.rs"
+[workspace]
+members = [
+    "crates/types",
+    "crates/broker",
+    "crates/store",
+    "crates/ops",
+    "crates/sdkvers",
+]
+resolver = "2"

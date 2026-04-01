@@ -1,0 +1,10 @@
+[package]
+name = "ops"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+types = { path = "../types" }
+broker = { path = "../broker" }
+store = { path = "../store" }
+thiserror = "2"
