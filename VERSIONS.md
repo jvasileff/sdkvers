@@ -7,7 +7,11 @@
 - **Bare versions are now exact matches.** `java = 21` previously expanded to the range
   `[21,22)` and matched any installed Java 21.x version. It now requires an installed
   version whose identifier is literally `21`. Use `java = ~21` to restore the old
-  major-line range behaviour, or `java = ~21 tem` to add a vendor constraint.
+  major-line range behaviour, or `java = ~21-tem` to add a vendor constraint.
+
+- **Whitespace-separated vendor field removed.** `java = ~21 tem` is now a parse error.
+  Vendor must be specified as a hyphen suffix with no whitespace: `java = ~21-tem`,
+  `java = [21,22)-graalce`. This applies to bare, tilde, and bracket forms alike.
 
 ### New features
 
@@ -16,12 +20,11 @@
   `~8.7.0` → `[8.7.0,8.7.1)`. Using `~` with a mixed version (e.g. `~26.ea.35`) is a
   parse error; use explicit bracket syntax such as `[26.ea.35,27)` instead.
 
-- **Inline vendor for Java** — the SDKMAN identifier format `23.0.1-graalce` can now be
-  used directly in `.sdkvers`. `java = 23.0.1-graalce` is equivalent to
-  `java = 23.0.1 graalce`, and `java = ~25-graalce` is equivalent to `java = ~25 graalce`.
-  Specifying vendor both inline and as a separate field on the same line is an error.
-  Inline vendor is only extracted for the `java` candidate; for all others, a trailing
-  `-suffix` is part of the version string.
+- **Vendor suffix for Java** — SDKMAN java identifiers encode vendor as a hyphen suffix
+  (`23.0.1-graalce`). This syntax is now supported directly in `.sdkvers` for all
+  expression forms: `java = 23.0.1-graalce`, `java = ~25-graalce`,
+  `java = [21,22)-graalce`. Vendor extraction is java-only; for all other candidates a
+  trailing `-suffix` is part of the version string and is never split off.
 
 ## v1.1.0
 

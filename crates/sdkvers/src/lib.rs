@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn config_line_with_vendor() {
-        let line = make_line("java = 21 tem");
+        let line = make_line("java = 21-tem");
         assert_eq!(line.candidate, "java");
         assert_eq!(line.vendor.as_deref(), Some("tem"));
     }
@@ -572,14 +572,15 @@ mod tests {
     }
 
     #[test]
-    fn inline_vendor_conflicts_with_separate_vendor_is_error() {
-        assert!(ConfigLineParser::new("java = 23.0.1-graalce graalce", 1).parse_line().is_err());
+    fn separate_vendor_field_is_an_error() {
+        // Vendor must be attached inline; whitespace-separated vendor is rejected.
+        assert!(ConfigLineParser::new("java = ~21 tem", 1).parse_line().is_err());
     }
 
     #[test]
-    fn inline_vendor_in_bracket_expr_is_not_extracted() {
-        // Bracket expressions are left intact; separate vendor field still works.
-        let line = ConfigLineParser::new("java = [25,26) graalce", 1).parse_line().unwrap();
+    fn inline_vendor_in_bracket_expr() {
+        // Vendor suffix attaches directly to a bracket expression.
+        let line = ConfigLineParser::new("java = [25,26)-graalce", 1).parse_line().unwrap();
         assert_eq!(line.vendor.as_deref(), Some("graalce"));
         assert!(matches!(line.expr, VersionExprNode::Range { .. }));
     }
@@ -857,7 +858,7 @@ mod tests {
     #[test]
     fn vendor_requires_exact_dist_match() {
         let resolver = Resolver;
-        let line = make_line("java = [21] graalce");
+        let line = make_line("java = [21]-graalce");
         let list = sdk_list("java", &["21.0.2-tem", "21.0.2-graalce"]);
         let matched: Vec<_> = list
             .rows
@@ -869,11 +870,12 @@ mod tests {
     }
 
     #[test]
+    #[test]
     fn vendor_match_is_case_sensitive() {
         let resolver = Resolver;
-        let line = make_line("java = [21] GraalCE");
-        let list = sdk_list("java", &["21.0.2-graalce"]);
-        // "GraalCE" != "graalce"
+        let line = make_line("java = [21]-graalce");
+        // "graalce" does not match "GRAALCE"
+        let list = sdk_list("java", &["21.0.2-GRAALCE"]);
         let any_match = list
             .rows
             .iter()
@@ -895,7 +897,7 @@ mod tests {
     #[test]
     fn vendor_filter_selects_matching_dist() {
         let resolver = Resolver;
-        let line = make_line("java = [21,22) tem");
+        let line = make_line("java = [21,22)-tem");
         let list = sdk_list("java", &["21.0.2-graalce", "21.0.2-tem"]);
         let result = resolver.resolve_line(&line, &list).unwrap();
         assert_eq!(result.dist.as_deref(), Some("tem"));
@@ -920,7 +922,7 @@ mod tests {
     #[test]
     fn identifier_used_as_resolution_target() {
         let resolver = Resolver;
-        let line = make_line("java = [21.0.2] tem");
+        let line = make_line("java = [21.0.2]-tem");
         let list = sdk_list("java", &["21.0.2-tem"]);
         let result = resolver.resolve_line(&line, &list).unwrap();
         // target should be the identifier "21.0.2-tem", not just the version "21.0.2"
@@ -1226,7 +1228,7 @@ mod tests {
     fn resolve_java_exact_version_against_fixture() {
         // 21.0.10-tem was installed at capture time
         let sdk = load_fixture("java");
-        let line = make_line("java = [21.0.10] tem");
+        let line = make_line("java = [21.0.10]-tem");
         let resolved = Resolver.resolve_line(&line, &sdk).unwrap();
         assert_eq!(resolved.target, "21.0.10-tem");
     }

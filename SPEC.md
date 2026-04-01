@@ -55,7 +55,7 @@ It is a developer convenience layer, not a lockfile and not a build constraint s
 Each non-empty, non-comment line declares one candidate requirement.
 
 ```
-<candidate> = <version-expr> [vendor]
+<candidate> = <version-expr>[-vendor]
 ```
 
 - Leading and trailing whitespace on each line is ignored.
@@ -64,14 +64,14 @@ Each non-empty, non-comment line declares one candidate requirement.
 - Inline comments are not supported in v1.
 - Candidate names are case-sensitive and must match SDKMAN candidate names exactly (e.g. `java`, `maven`, `gradle`).
 - `=` is required and must be present.
-- The vendor token, if present, follows the version expression and is separated by whitespace.
+- The optional vendor suffix, if present, is attached directly to the version expression with a hyphen (no whitespace).
 - Range tokens must contain no internal spaces in v1 (see [Version Expressions](#4-version-expressions)).
 
 ### Examples
 
 ```
 # Activate Java 21.x (any patch), Temurin distribution
-java = ~21 tem
+java = ~21-tem
 
 # Maven anywhere in the 3.9.x line
 maven = [3.9,4)
@@ -347,35 +347,21 @@ Some SDKMAN candidates expose a separate distribution or vendor field alongside 
 
 ### 7.1 Syntax
 
-A vendor can be specified in two equivalent ways:
-
-**Separate field** — a token after the version expression, separated by whitespace:
-
-```
-java = ~21 tem
-java = [21,22) graalce
-java = [17,) zulu
-```
-
-**Inline suffix** — appended directly to a bare or tilde version with a hyphen:
+A vendor is specified as a hyphen-separated suffix attached directly to the version expression (no whitespace):
 
 ```
 java = 23.0.1-graalce
-java = ~25-graalce
+java = ~21-tem
+java = [21,22)-graalce
+java = [17,)-zulu
 ```
 
-The two forms are equivalent. Specifying vendor both ways on the same line is an error:
+For bare and tilde forms, the vendor suffix follows the version or tilde expression. For bracket range expressions, the vendor suffix follows the closing bracket. Whitespace between the expression and the vendor is not permitted.
+
+The following is an error — vendor must not be specified both as an inline suffix and inside a bracket expression:
 
 ```
-java = 23.0.1-graalce graalce   # error: vendor specified twice
-```
-
-Inline vendor is only supported for bare and tilde forms. Bracket range expressions must
-use the separate field:
-
-```
-java = [21,22) graalce          # correct
-java = [21-graalce,22)          # not supported; vendor not extracted from bracket expressions
+java = [21-graalce,22)          # not supported; vendor not extracted from inside bracket expressions
 ```
 
 ### 7.2 Matching rules
@@ -387,10 +373,10 @@ java = [21-graalce,22)          # not supported; vendor not extracted from brack
 - Vendor matching is exact, not substring-based.
 
 ```
-java = 21 graalce   matches      21.0.2-graalce
-java = 21 graalce   does not match  21.0.2-graal         (prefix, not exact)
-java = 21 graalce   does not match  21.0.2-graalce-openj9 (suffix, not exact)
-java = 21 graalce   does not match  21.0.2-tem
+java = 21-graalce   matches         21.0.2-graalce       (version matches, dist matches)
+java = 21-graalce   does not match  21.0.2-graal         (prefix, not exact)
+java = 21-graalce   does not match  21.0.2-graalce-openj9 (suffix, not exact)
+java = 21-graalce   does not match  21.0.2-tem
 ```
 
 ### 7.3 Candidates without vendor fields
@@ -442,7 +428,7 @@ For each line in `.sdkvers`, in order:
 
 1. Parse the candidate name.
 2. Parse the version expression. Bare versions are exact matches; tilde versions expand to a half-open range.
-3. Parse the optional vendor token (separate field or inline suffix for java).
+3. Parse the optional vendor suffix (inline `-suffix` for java only; not applicable to other candidates).
 4. Read the locally installed versions from `$SDKMAN_DIR/candidates/<candidate>/`.
 5. Parse each installed identifier into version and distribution fields where applicable.
 6. Apply prerelease eligibility filtering (see [Section 6.1](#61-prerelease-eligibility)).
@@ -535,7 +521,7 @@ Error messages are written to stderr and include the program name, and where app
 
 ```
 sdkvers: no .sdkvers file found
-sdkvers: invalid line 3: expected "<candidate> = <version-expr> [vendor]"
+sdkvers: invalid line 3: expected "<candidate> = <version-expr>[-vendor]"
 sdkvers: invalid version expression on line 5: [21,22
 sdkvers: candidate "java" has no installed version matching [21,22) with vendor "graalce"
 sdkvers: candidate "maven" has no installed version matching [3.9,4)

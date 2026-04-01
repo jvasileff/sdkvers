@@ -55,7 +55,7 @@ Using maven 3.9.14
 If a required version is not installed:
 
 ```
-sdkvers: candidate "java" has no installed version matching [21,22) with vendor "tem"
+sdkvers: candidate "java" has no installed version matching ~21-tem
 ```
 
 All candidates are attempted before any errors are reported. The exit status is non-zero if any candidate could not be activated.
@@ -65,7 +65,7 @@ All candidates are attempted before any errors are reported. The exit status is 
 Each line declares one candidate requirement:
 
 ```
-<candidate> = <version-expr> [vendor]
+<candidate> = <version-expr>[-vendor]
 ```
 
 Blank lines and lines starting with `#` are ignored.
@@ -73,32 +73,42 @@ Blank lines and lines starting with `#` are ignored.
 ### Examples
 
 ```
-# Simple version lines
-java = 21
-maven = 3.9
+# Exact versions
+java = 21.0.2
+maven = 3.9.9
 gradle = 8.7.0
 
-# Explicit version range
-java = [21,22)
+# Range: any 21.x Java, Temurin distribution
+java = ~21-tem
 
-# Specific vendor (e.g. Temurin, GraalVM CE)
-java = 21 tem
-java = 21 graalce
+# Range: any GraalVM CE in the 21 line
+java = [21,22)-graalce
+
+# Explicit range with no vendor filter
+maven = [3.9,4)
 ```
 
 Candidate names must match SDKMAN candidate names exactly (`java`, `maven`, `gradle`, etc.).
 
 ### Version expressions
 
-A bare numeric version is shorthand for a range:
+A bare version is always an **exact match**:
 
 | Expression | Matches |
 |------------|---------|
-| `21` | any installed Java 21.x.x |
-| `3.9` | any installed 3.9.x |
-| `8.7.0` | exactly 8.7.0 |
+| `21` | exactly `21` |
+| `3.9` | exactly `3.9` |
+| `8.7.0` | exactly `8.7.0` |
 
-For more control, use explicit Maven-style range syntax:
+Use `~` for a **prefix range** (increments the last segment):
+
+| Expression | Matches |
+|------------|---------|
+| `~21` | `[21,22)` — any version in the Java 21 line |
+| `~3.9` | `[3.9,3.10)` — any 3.9.x |
+| `~8.7.0` | `[8.7.0,8.7.1)` — any patch of 8.7.0 |
+
+For full control, use explicit Maven-style range syntax:
 
 | Expression | Matches |
 |------------|---------|
@@ -113,11 +123,12 @@ Pre-release versions (ea, rc, alpha, beta, etc.) are excluded from ranges unless
 
 ### Vendor filtering
 
-For candidates that expose a distribution field (currently Java), an optional vendor token after the version expression filters by distribution:
+For Java, an optional vendor suffix filters by distribution. Attach it directly to the version expression with a hyphen (no whitespace):
 
 ```
-java = 21 tem       # Temurin only
-java = [21,) graalce  # GraalVM CE, any 21+
+java = 21.0.2-tem        # exactly 21.0.2, Temurin
+java = ~21-tem           # any 21.x, Temurin
+java = [21,)-graalce     # GraalVM CE, any 21+
 ```
 
 Vendor matching is case-sensitive and exact.

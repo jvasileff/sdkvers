@@ -489,40 +489,23 @@ impl<'a> ConfigLineParser<'a> {
         self.skip_whitespace()?;
         let raw_expr_text = self.parse_expr_text()?;
 
-        // For java, a trailing -SUFFIX where SUFFIX is all lowercase ASCII letters is
-        // treated as an inline vendor specifier (e.g. "23.0.1-graalce" or "~25-graalce").
-        // This only applies to bare and tilde forms; bracket expressions are left intact.
-        // For all other candidates, -SUFFIX is part of the version string.
-        let is_bracket = raw_expr_text.starts_with('[') || raw_expr_text.starts_with('(');
-        let (expr_text, inline_vendor) = if candidate == "java" && !is_bracket {
-            split_inline_vendor(&raw_expr_text)
+        // For java, extract a trailing -SUFFIX (all lowercase ASCII letters) as the
+        // vendor.  The suffix attaches directly to the expression with no whitespace,
+        // regardless of expression form: bare ("23.0.1-graalce"), tilde ("~25-graalce"),
+        // or bracket ("[25,26)-graalce").  For all other candidates -SUFFIX is part of
+        // the version string and is never treated as a vendor.
+        let (expr_text, vendor) = if candidate == "java" {
+            let (text, v) = split_inline_vendor(&raw_expr_text);
+            (text, v.map(str::to_string))
         } else {
             (raw_expr_text.as_str(), None)
         };
 
         let expr = VersionParser::new(expr_text).parse_version_expr()?;
         self.skip_whitespace()?;
-        let separate_vendor = if self.at_end() {
-            None
-        } else {
-            let v = self.parse_vendor()?;
-            self.skip_whitespace()?;
-            if !self.at_end() {
-                return Err(self.error("unexpected trailing input"));
-            }
-            Some(v)
-        };
-
-        let vendor = match (inline_vendor, separate_vendor) {
-            (Some(_), Some(_)) => {
-                return Err(self.error(
-                    "vendor specified both inline (in version expression) and as a separate field",
-                ));
-            }
-            (Some(v), None) => Some(v.to_string()),
-            (None, Some(v)) => Some(v),
-            (None, None) => None,
-        };
+        if !self.at_end() {
+            return Err(self.error("unexpected trailing input after version expression"));
+        }
 
         Ok(ConfigLineNode {
             line_number: self.line_number,
@@ -558,17 +541,6 @@ impl<'a> ConfigLineParser<'a> {
         }
         if start == self.index {
             return Err(self.error("missing version expression after '='"));
-        }
-        Ok(self.source[start..self.index].to_string())
-    }
-
-    fn parse_vendor(&mut self) -> Result<String> {
-        let start = self.index;
-        while !self.at_end() && !self.current_char()?.is_whitespace() {
-            self.advance()?;
-        }
-        if start == self.index {
-            return Err(self.error("expected vendor"));
         }
         Ok(self.source[start..self.index].to_string())
     }
