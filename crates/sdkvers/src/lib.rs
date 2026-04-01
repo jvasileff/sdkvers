@@ -318,18 +318,31 @@ mod tests {
             .unwrap_or_else(|e| panic!("expr_matches({expr:?}, {version:?}): {e}"))
     }
 
-    // ---- parsing: bare version expansion ----
+    // ---- parsing: bare version (exact) ----
 
     #[test]
-    fn bare_major_expands_to_major_range() {
-        match parse_expr("21") {
+    fn bare_major_is_exact() {
+        assert!(matches!(parse_expr("21"), VersionExprNode::Exact { .. }));
+    }
+
+    #[test]
+    fn bare_minor_is_exact() {
+        assert!(matches!(parse_expr("3.9"), VersionExprNode::Exact { .. }));
+    }
+
+    // ---- parsing: tilde shorthand (range) ----
+
+    #[test]
+    fn tilde_major_expands_to_major_range() {
+        match parse_expr("~21") {
             VersionExprNode::Range {
+                source,
                 lower_inclusive,
                 lower,
                 upper,
                 upper_inclusive,
-                ..
             } => {
+                assert_eq!(source, "~21");
                 assert!(lower_inclusive);
                 assert!(!upper_inclusive);
                 assert_eq!(lower.unwrap().source, "21");
@@ -340,8 +353,8 @@ mod tests {
     }
 
     #[test]
-    fn bare_minor_expands_to_minor_range() {
-        match parse_expr("3.9") {
+    fn tilde_minor_expands_to_minor_range() {
+        match parse_expr("~3.9") {
             VersionExprNode::Range {
                 lower_inclusive,
                 lower,
@@ -356,6 +369,34 @@ mod tests {
             }
             _ => panic!("expected range"),
         }
+    }
+
+    #[test]
+    fn tilde_three_segment_expands_to_patch_range() {
+        match parse_expr("~8.7.0") {
+            VersionExprNode::Range {
+                lower_inclusive,
+                lower,
+                upper,
+                upper_inclusive,
+                ..
+            } => {
+                assert!(lower_inclusive);
+                assert!(!upper_inclusive);
+                assert_eq!(lower.unwrap().source, "8.7.0");
+                assert_eq!(upper.unwrap().source, "8.7.1");
+            }
+            _ => panic!("expected range"),
+        }
+    }
+
+    #[test]
+    fn tilde_mixed_version_is_error() {
+        assert!(
+            VersionParser::new("~26.ea.35")
+                .parse_version_expr()
+                .is_err()
+        );
     }
 
     #[test]
@@ -505,6 +546,54 @@ mod tests {
     fn config_line_whitespace_trimmed() {
         let line = make_line("  java = 21  ");
         assert_eq!(line.candidate, "java");
+    }
+
+    // ---- parsing: inline vendor syntax ----
+
+    #[test]
+    fn inline_vendor_bare_version() {
+        let line = ConfigLineParser::new("java = 23.0.1-graalce", 1).parse_line().unwrap();
+        assert_eq!(line.vendor.as_deref(), Some("graalce"));
+        assert!(matches!(line.expr, VersionExprNode::Exact { .. }));
+        if let VersionExprNode::Exact { version, .. } = &line.expr {
+            assert_eq!(version.source, "23.0.1");
+        }
+    }
+
+    #[test]
+    fn inline_vendor_tilde_version() {
+        let line = ConfigLineParser::new("java = ~25-graalce", 1).parse_line().unwrap();
+        assert_eq!(line.vendor.as_deref(), Some("graalce"));
+        assert!(matches!(line.expr, VersionExprNode::Range { .. }));
+        if let VersionExprNode::Range { lower, upper, .. } = &line.expr {
+            assert_eq!(lower.as_ref().unwrap().source, "25");
+            assert_eq!(upper.as_ref().unwrap().source, "26");
+        }
+    }
+
+    #[test]
+    fn inline_vendor_conflicts_with_separate_vendor_is_error() {
+        assert!(ConfigLineParser::new("java = 23.0.1-graalce graalce", 1).parse_line().is_err());
+    }
+
+    #[test]
+    fn inline_vendor_in_bracket_expr_is_not_extracted() {
+        // Bracket expressions are left intact; separate vendor field still works.
+        let line = ConfigLineParser::new("java = [25,26) graalce", 1).parse_line().unwrap();
+        assert_eq!(line.vendor.as_deref(), Some("graalce"));
+        assert!(matches!(line.expr, VersionExprNode::Range { .. }));
+    }
+
+    #[test]
+    fn non_java_suffix_not_treated_as_vendor() {
+        // For non-java candidates, -rc suffix is part of the version, not a vendor.
+        let line = ConfigLineParser::new("gradle = 9.4.0-rc", 1).parse_line().unwrap();
+        assert!(line.vendor.is_none());
+        if let VersionExprNode::Exact { version, .. } = &line.expr {
+            assert_eq!(version.source, "9.4.0-rc");
+        } else {
+            panic!("expected Exact");
+        }
     }
 
     #[test]
@@ -714,6 +803,39 @@ mod tests {
         assert!(!expr_matches("(21,22]", "21")); // exclusive lower
         assert!(expr_matches("[21,22)", "21")); // inclusive lower
         assert!(expr_matches("(21,22]", "22")); // inclusive upper
+    }
+
+    // ---- bare exact vs tilde range membership ----
+
+    #[test]
+    fn bare_major_matches_only_that_exact_version() {
+        assert!(expr_matches("21", "21"));
+        assert!(!expr_matches("21", "21.0.5")); // longer version is not an exact match
+        assert!(!expr_matches("21", "22"));
+    }
+
+    #[test]
+    fn bare_minor_matches_only_that_exact_version() {
+        assert!(expr_matches("3.9", "3.9"));
+        assert!(!expr_matches("3.9", "3.9.14")); // longer version is not an exact match
+        assert!(!expr_matches("3.9", "3.10"));
+    }
+
+    #[test]
+    fn tilde_major_matches_any_version_in_major_line() {
+        assert!(expr_matches("~21", "21"));
+        assert!(expr_matches("~21", "21.0.5"));
+        assert!(expr_matches("~21", "21.0.10-tem"));
+        assert!(!expr_matches("~21", "22"));
+        assert!(!expr_matches("~21", "20"));
+    }
+
+    #[test]
+    fn tilde_minor_matches_any_version_in_minor_line() {
+        assert!(expr_matches("~3.9", "3.9"));
+        assert!(expr_matches("~3.9", "3.9.14"));
+        assert!(!expr_matches("~3.9", "3.10"));
+        assert!(!expr_matches("~3.9", "3.8"));
     }
 
     // ---- vendor matching ----

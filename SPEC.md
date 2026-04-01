@@ -9,7 +9,7 @@ A separate README covers installation and day-to-day usage. This document is for
 1. [Purpose](#1-purpose)
 2. [Scope and Non-goals](#2-scope-and-non-goals)
 3. [The `.sdkvers` File](#3-the-sdkvers-file)
-4. [Version Expressions](#4-version-expressions)
+4. [Version Expressions](#4-version-expressions) (bare exact, tilde shorthand, explicit ranges)
 5. [Version Comparison](#5-version-comparison)
 6. [Range Membership](#6-range-membership)
 7. [Vendor Filtering](#7-vendor-filtering)
@@ -70,8 +70,8 @@ Each non-empty, non-comment line declares one candidate requirement.
 ### Examples
 
 ```
-# Activate Java 21 (any patch), Temurin distribution
-java = 21 tem
+# Activate Java 21.x (any patch), Temurin distribution
+java = ~21 tem
 
 # Maven anywhere in the 3.9.x line
 maven = [3.9,4)
@@ -85,33 +85,37 @@ Lines are processed top-to-bottom. All candidates are attempted even when earlie
 
 ## 4. Version Expressions
 
-There are two kinds of version expression: **bare versions** and **explicit ranges**.
+There are three kinds of version expression: **bare versions**, **tilde shorthand**, and **explicit ranges**.
 
 ### 4.1 Bare versions
 
-Bare versions are shorthand. They are expanded according to how many purely numeric segments they contain.
-
-| Form | Segments | Interpretation | Example expansion |
-|------|----------|----------------|-------------------|
-| `21` | one numeric | major-line range | `[21,22)` |
-| `21.1` | two numeric | minor-line range | `[21.1,21.2)` |
-| `21.0.10` | three or more numeric | exact match | `[21.0.10]` |
-| `4.10.1.3` | four numeric | exact match | `[4.10.1.3]` |
-
-Any bare version containing a letter or underscore is always treated as an exact match, regardless of segment count.
+A bare version is always an **exact match**, regardless of how many segments it contains or whether it contains letters.
 
 | Bare form | Interpretation |
 |-----------|----------------|
-| `26.ea.35` | exact match |
-| `2.16.0.Final` | exact match |
-| `21.0.10.fx` | exact match |
-| `5.23.0.0_2` | exact match |
-| `v0.1.0` | exact match |
-| `swan-lake-p3` | exact match |
+| `21` | exact match for version `21` |
+| `3.9` | exact match for version `3.9` |
+| `8.7.0` | exact match for version `8.7.0` |
+| `26.ea.35` | exact match for version `26.ea.35` |
+| `2.16.0.Final` | exact match (release alias; see [Section 6.3](#63-exact-match-semantics)) |
+| `21.0.10.fx` | exact match for version `21.0.10.fx` |
 
-This rule exists because mixed alphanumeric versions are too irregular to safely interpret as prefix ranges.
+### 4.2 Tilde shorthand
 
-### 4.2 Explicit ranges
+The `~` prefix expands a **pure-numeric** version to a half-open prefix range by incrementing its last segment:
+
+| Tilde form | Expansion |
+|------------|-----------|
+| `~21` | `[21,22)` — any version in the Java 21 major line |
+| `~3.9` | `[3.9,3.10)` — any version in the 3.9 minor line |
+| `~8.7.0` | `[8.7.0,8.7.1)` — any patch of 8.7.0 |
+
+`~` is only valid for pure-numeric versions (no letters or underscores). `~26.ea.35` is a
+parse error. Although it might appear to expand to `[26.ea.35,26.ea.36)`, that range covers
+only a single EA build, which is almost certainly not the intent. Use explicit bracket syntax
+instead: `[26.ea.35,27)` makes the upper bound deliberate.
+
+### 4.3 Explicit ranges
 
 Explicit ranges use Maven-style interval notation. The brackets and parentheses determine whether each bound is inclusive or exclusive.
 
@@ -129,6 +133,8 @@ Explicit ranges use Maven-style interval notation. The brackets and parentheses 
 Commas within range brackets must not be surrounded by spaces in v1. `[21,22)` is accepted; `[21, 22)` is rejected.
 
 Version comparison follows the rules in [Section 5](#5-version-comparison). Range membership follows the rules in [Section 6](#6-range-membership), which includes prerelease filtering behavior.
+
+For prerelease opt-in via explicit ranges, see [Section 6.1](#61-prerelease-eligibility). Example: `[26.ea.35,)` allows EA build 35 and later of Java 26 as well as any stable release on any subsequent line.
 
 ## 5. Version Comparison
 
@@ -316,7 +322,7 @@ This is intentional. Variant qualifiers represent a packaging or feature differe
 
 ### 6.3 Exact match semantics
 
-An exact match (`[a]` or a bare version with three or more numeric segments) matches any candidate that compares equal to `a` under the normalized comparison rules. Because release aliases compare equal to the plain release:
+An exact match (`[a]` or any bare version) matches any candidate that compares equal to `a` under the normalized comparison rules. Because release aliases compare equal to the plain release:
 
 ```
 [2.16.0]  matches  2.16.0
@@ -341,12 +347,35 @@ Some SDKMAN candidates expose a separate distribution or vendor field alongside 
 
 ### 7.1 Syntax
 
-An optional vendor token follows the version expression on a `.sdkvers` line:
+A vendor can be specified in two equivalent ways:
+
+**Separate field** — a token after the version expression, separated by whitespace:
 
 ```
-java = 21 tem
+java = ~21 tem
 java = [21,22) graalce
 java = [17,) zulu
+```
+
+**Inline suffix** — appended directly to a bare or tilde version with a hyphen:
+
+```
+java = 23.0.1-graalce
+java = ~25-graalce
+```
+
+The two forms are equivalent. Specifying vendor both ways on the same line is an error:
+
+```
+java = 23.0.1-graalce graalce   # error: vendor specified twice
+```
+
+Inline vendor is only supported for bare and tilde forms. Bracket range expressions must
+use the separate field:
+
+```
+java = [21,22) graalce          # correct
+java = [21-graalce,22)          # not supported; vendor not extracted from bracket expressions
 ```
 
 ### 7.2 Matching rules
@@ -412,8 +441,8 @@ Because `sdk use` must modify the current shell environment, it cannot be run in
 For each line in `.sdkvers`, in order:
 
 1. Parse the candidate name.
-2. Parse the version expression and expand bare versions to their canonical range form.
-3. Parse the optional vendor token.
+2. Parse the version expression. Bare versions are exact matches; tilde versions expand to a half-open range.
+3. Parse the optional vendor token (separate field or inline suffix for java).
 4. Read the locally installed versions from `$SDKMAN_DIR/candidates/<candidate>/`.
 5. Parse each installed identifier into version and distribution fields where applicable.
 6. Apply prerelease eligibility filtering (see [Section 6.1](#61-prerelease-eligibility)).
@@ -433,9 +462,9 @@ When multiple installed versions satisfy all constraints, `sdkvers` selects the 
 Examples:
 
 ```
-java = 21
-  Installed: 17.0.9, 21.0.1-tem, 21.0.2-tem, 22.0.0-tem
-  Selected:  21.0.2-tem
+java = ~21
+  Installed: 17.0.9-tem, 21.0.1-tem, 21.0.2-tem, 22.0.0-tem
+  Selected:  21.0.2-tem        (~21 expands to [21,22))
 
 maven = [3.9,4)
   Installed: 3.8.8, 3.9.6, 3.9.9, 4.0.0-rc-1

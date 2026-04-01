@@ -177,44 +177,51 @@ impl<'a> VersionParser<'a> {
         }
         if matches!(self.peek_char(), Some('[' | '(')) {
             self.parse_bracketed_version_expr()
+        } else if self.peek_char() == Some('~') {
+            // ~ver is range shorthand: ~21 → [21,22), ~3.9 → [3.9,3.10), ~8.7.0 → [8.7.0,8.7.1).
+            // Only valid for pure-numeric versions; mixed versions (e.g. ~26.ea.35) are rejected.
+            self.advance()?;
+            let version = self.parse_version_at_current()?;
+            if !self.at_end() {
+                return Err(self.error("unexpected trailing input"));
+            }
+            Self::tilde_version_expr(version)
         } else {
-            let version = self.parse_version()?;
-            Ok(Self::bare_version_expr(version)?)
+            // Bare version is always an exact match: 21, 3.9, 8.7.0 all require the
+            // installed identifier to match that version exactly.  Use ~ver for a
+            // prefix range.
+            let version = self.parse_version_at_current()?;
+            if !self.at_end() {
+                return Err(self.error("unexpected trailing input"));
+            }
+            Ok(VersionExprNode::Exact {
+                source: version.source.clone(),
+                version,
+            })
         }
     }
 
-    // Expands a bare version to its canonical range form:
-    //   1 numeric segment ("21")      → [21,22)   major-line range
-    //   2 numeric segments ("3.9")    → [3.9,3.10) minor-line range
-    //   3+ numeric segments ("8.7.0") → [8.7.0]    exact match
-    // Any version containing a letter or underscore is always treated as exact,
-    // regardless of segment count, because mixed tokens are too irregular to
-    // interpret as a prefix range.
-    fn bare_version_expr(version: VersionNode) -> Result<VersionExprNode> {
-        let segment_count = Self::pure_numeric_segment_count(&version);
-        if segment_count == 1 {
-            let upper = VersionParser::new(&Self::next_major(&version.source)?).parse_version()?;
-            return Ok(VersionExprNode::Range {
-                source: version.source.clone(),
-                lower_inclusive: true,
-                lower: Some(version),
-                upper: Some(upper),
-                upper_inclusive: false,
-            });
+    // Expands ~ver to [ver, next) by incrementing the last pure-numeric segment:
+    //   ~21    → [21,22)
+    //   ~3.9   → [3.9,3.10)
+    //   ~8.7.0 → [8.7.0,8.7.1)
+    // Mixed versions (containing letters or underscores) are rejected because
+    // incrementing their last segment is not well-defined.
+    fn tilde_version_expr(version: VersionNode) -> Result<VersionExprNode> {
+        if Self::pure_numeric_segment_count(&version) == 0 {
+            return Err(err(format!(
+                "'~' shorthand requires a pure-numeric version, got '{}'",
+                version.source
+            )));
         }
-        if segment_count == 2 {
-            let upper = VersionParser::new(&Self::next_minor(&version.source)?).parse_version()?;
-            return Ok(VersionExprNode::Range {
-                source: version.source.clone(),
-                lower_inclusive: true,
-                lower: Some(version),
-                upper: Some(upper),
-                upper_inclusive: false,
-            });
-        }
-        Ok(VersionExprNode::Exact {
-            source: version.source.clone(),
-            version,
+        let upper_source = Self::next_version_prefix(&version.source)?;
+        let upper = VersionParser::new(&upper_source).parse_version()?;
+        Ok(VersionExprNode::Range {
+            source: format!("~{}", version.source),
+            lower_inclusive: true,
+            lower: Some(version),
+            upper: Some(upper),
+            upper_inclusive: false,
         })
     }
 
@@ -230,26 +237,27 @@ impl<'a> VersionParser<'a> {
         version.components.len()
     }
 
-    fn next_major(text: &str) -> Result<String> {
-        let value: i64 = text
-            .parse()
-            .map_err(|_| err(format!("invalid major version: {text}")))?;
-        Ok((value + 1).to_string())
-    }
-
-    fn next_minor(text: &str) -> Result<String> {
-        let dot = text
-            .find('.')
-            .ok_or_else(|| err(format!("invalid minor version: {text}")))?;
-        let major_text = &text[..dot];
-        let minor_text = &text[dot + 1..];
-        let major: i64 = major_text
-            .parse()
-            .map_err(|_| err(format!("invalid major version: {major_text}")))?;
-        let minor: i64 = minor_text
-            .parse()
-            .map_err(|_| err(format!("invalid minor version: {minor_text}")))?;
-        Ok(format!("{major}.{}", minor + 1))
+    // Increments the last segment of a pure-numeric version string:
+    //   "21"    → "22"
+    //   "3.9"   → "3.10"
+    //   "8.7.0" → "8.7.1"
+    fn next_version_prefix(text: &str) -> Result<String> {
+        match text.rfind('.') {
+            None => {
+                let value: i64 = text
+                    .parse()
+                    .map_err(|_| err(format!("invalid version segment: {text}")))?;
+                Ok((value + 1).to_string())
+            }
+            Some(dot) => {
+                let prefix = &text[..dot];
+                let last = &text[dot + 1..];
+                let value: i64 = last
+                    .parse()
+                    .map_err(|_| err(format!("invalid version segment: {last}")))?;
+                Ok(format!("{prefix}.{}", value + 1))
+            }
+        }
     }
 
     // Parses [a,b], [a,b), (a,b], (a,b), [a,), (,b], (,b), [a].
@@ -479,19 +487,43 @@ impl<'a> ConfigLineParser<'a> {
         self.skip_whitespace()?;
         self.consume_char('=')?;
         self.skip_whitespace()?;
-        let expr_text = self.parse_expr_text()?;
-        let expr = VersionParser::new(&expr_text).parse_version_expr()?;
+        let raw_expr_text = self.parse_expr_text()?;
+
+        // For java, a trailing -SUFFIX where SUFFIX is all lowercase ASCII letters is
+        // treated as an inline vendor specifier (e.g. "23.0.1-graalce" or "~25-graalce").
+        // This only applies to bare and tilde forms; bracket expressions are left intact.
+        // For all other candidates, -SUFFIX is part of the version string.
+        let is_bracket = raw_expr_text.starts_with('[') || raw_expr_text.starts_with('(');
+        let (expr_text, inline_vendor) = if candidate == "java" && !is_bracket {
+            split_inline_vendor(&raw_expr_text)
+        } else {
+            (raw_expr_text.as_str(), None)
+        };
+
+        let expr = VersionParser::new(expr_text).parse_version_expr()?;
         self.skip_whitespace()?;
-        let vendor = if self.at_end() {
+        let separate_vendor = if self.at_end() {
             None
         } else {
-            let vendor = self.parse_vendor()?;
+            let v = self.parse_vendor()?;
             self.skip_whitespace()?;
             if !self.at_end() {
                 return Err(self.error("unexpected trailing input"));
             }
-            Some(vendor)
+            Some(v)
         };
+
+        let vendor = match (inline_vendor, separate_vendor) {
+            (Some(_), Some(_)) => {
+                return Err(self.error(
+                    "vendor specified both inline (in version expression) and as a separate field",
+                ));
+            }
+            (Some(v), None) => Some(v.to_string()),
+            (None, Some(v)) => Some(v),
+            (None, None) => None,
+        };
+
         Ok(ConfigLineNode {
             line_number: self.line_number,
             source: self.source.to_string(),
@@ -918,8 +950,17 @@ impl Resolver {
     // Stable candidates always pass this filter regardless of bounds.
     fn prerelease_allowed_for_expr(&self, expr: &VersionExprNode, candidate_version: &str) -> Result<bool> {
         if let VersionExprNode::Exact { version, .. } = expr {
-            // Use semantic comparison (no string tiebreaker) so release aliases
-            // like 2.16.0.Final are eligible for exact match against [2.16.0].
+            let candidate_node = VersionParser::new(candidate_version).parse_version()?;
+            if self.prerelease_base(&candidate_node)?.is_none() {
+                // Stable candidate: the prerelease gate passes; let version_expr_matches
+                // decide via semantic_eq.  This mirrors the Range arm's early return for
+                // stable candidates and keeps prerelease filtering separate from exact
+                // version matching.
+                return Ok(true);
+            }
+            // Pre-release candidate: only allow it when it is the exact version
+            // requested, e.g. [2.16.0.Final] against "2.16.0.Final".  Use semantic
+            // comparison so release aliases compare equal to their plain counterpart.
             return self.semantic_eq(candidate_version, version);
         }
         let candidate = VersionParser::new(candidate_version).parse_version()?;
@@ -1100,6 +1141,24 @@ impl Resolver {
         }
         cmp_i32(role_rank(left.role).cmp(&role_rank(right.role)))
     }
+}
+
+// For java config lines, strips a trailing -SUFFIX from the expression text and
+// returns it as an inline vendor when SUFFIX is non-empty and entirely lowercase
+// ASCII letters.  Returns the original text unchanged for all other cases.
+//
+// Java version strings in SDKMAN are always pure-numeric (e.g. "23.0.1"); the
+// vendor/dist identifier is the alphabetic suffix after the final hyphen (e.g.
+// "graalce", "tem").  No qualifier-exclusion heuristic is needed because java
+// versions never embed prerelease qualifiers with a hyphen separator.
+fn split_inline_vendor(expr_text: &str) -> (&str, Option<&str>) {
+    if let Some(dash) = expr_text.rfind('-') {
+        let suffix = &expr_text[dash + 1..];
+        if !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_lowercase()) {
+            return (&expr_text[..dash], Some(suffix));
+        }
+    }
+    (expr_text, None)
 }
 
 fn cmp_i32(ordering: std::cmp::Ordering) -> i32 {
