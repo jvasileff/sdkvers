@@ -12,17 +12,23 @@ This document covers how to build, test, and extend `sdkvers`.
 ## Project structure
 
 ```
-Cargo.toml          — crate manifest (lib + binary)
-src/
-  lib.rs            — all parsing, version comparison, and resolution logic
-  main.rs           — CLI entry point (sdkvers-resolve binary)
-sdkvers-init.sh     — shell init script; defines the sdkvers() shell function
-sdkvers-resolve     — POSIX sh launcher; selects and runs the platform binary
-dist/               — assembled distribution tree (output of just dist)
-justfile            — build recipes
+Cargo.toml              — workspace manifest
+crates/
+  types/                — shared types and error definitions
+  broker/               — SDKMAN Broker API client (HTTP, candidate listing, downloads)
+  store/                — local candidate storage (archive extraction, symlinks)
+  ops/                  — high-level SDK operations (install, use, list, etc.)
+  sdkvers/
+    src/
+      lib.rs            — version parsing, comparison, and resolution logic
+      main.rs           — CLI entry point (sdkvers-resolve binary)
+sdkvers-init.sh         — shell init script; defines the sdkvers() shell function
+sdkvers-resolve         — POSIX sh launcher; selects and runs the platform binary
+dist/                   — assembled distribution tree (output of just dist)
+justfile                — build recipes
 ```
 
-The crate builds one library (`sdkvers`) and one binary (`sdkvers-resolve`). All logic lives in `lib.rs`; `main.rs` is a thin CLI wrapper.
+The workspace produces one user-facing binary (`sdkvers-resolve`) from the `sdkvers` crate. `lib.rs` holds version parsing, comparison, and resolution logic; `main.rs` is a thin CLI wrapper. The supporting crates (`types`, `broker`, `store`, `ops`) implement the SDKMAN Broker API client and local candidate management.
 
 ## Running tests
 
