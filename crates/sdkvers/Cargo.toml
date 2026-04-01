@@ -16,3 +16,4 @@ path = "src/main.rs"
 [dependencies]
 types = { path = "../types" }
 store = { path = "../store" }
+broker = { path = "../broker" }

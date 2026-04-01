@@ -1,8 +1,6 @@
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub use types::{
     Atom, AtomKind, Component, ConfigLineNode, ConfigLineParser, DocumentLineNode, DocumentNode,
@@ -71,50 +69,6 @@ pub fn bootstrap_sdkvers_content() -> Result<String> {
 }
 
 
-pub fn run_sdk_list(candidate: &str) -> Result<String> {
-    let init_path = sdkman_init_path()?;
-    let script = format!(
-        ". '{}' >/dev/null 2>&1; sdk list '{}'",
-        shell_escape_single_quoted(&init_path),
-        shell_escape_single_quoted(candidate)
-    );
-    let output = Command::new("bash")
-        .arg("-c")
-        .arg(script)
-        .output()
-        .map_err(|e| err(format!("failed to run sdk list {candidate}: {e}")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.is_empty() {
-            return Err(err(format!(
-                "sdk list {candidate} failed with exit code {}",
-                output.status.code().unwrap_or(1)
-            )));
-        }
-        return Err(err(format!(
-            "sdk list {candidate} failed with exit code {}: {stderr}",
-            output.status.code().unwrap_or(1)
-        )));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn sdkman_init_path() -> Result<String> {
-    if let Ok(dir) = env::var("SDKMAN_DIR") {
-        return Ok(format!("{dir}/bin/sdkman-init.sh"));
-    }
-    let home = env::var("HOME").map_err(|_| err("could not determine home directory for SDKMAN lookup"))?;
-    Ok(format!("{home}/.sdkman/bin/sdkman-init.sh"))
-}
-
-// Escapes a string for use inside single quotes in a POSIX shell command.
-// Single quotes cannot be escaped inside single quotes; the technique is to
-// end the single-quoted string, insert a double-quoted single quote, then
-// reopen the single-quoted string: ' → '"'"'
-fn shell_escape_single_quoted(text: &str) -> String {
-    text.replace('\'', "'\"'\"'")
-}
 
 pub fn read_utf8_file(path: &str) -> Result<String> {
     fs::read_to_string(path).map_err(|e| err(format!("failed to read file: {path}: {e}")))
@@ -154,8 +108,9 @@ pub fn resolve_document(path: &str) -> Result<Vec<String>> {
 }
 
 pub fn suggest_install(line: &ConfigLineNode) -> Option<String> {
-    let text = run_sdk_list(&line.candidate).ok()?;
-    let sdk = parse_sdk_list(&line.candidate, &text);
+    let platform = Platform::current().ok()?;
+    let candidate = Candidate::new(&line.candidate);
+    let sdk = broker::list_versions(&candidate, &platform).ok()?;
     let row = find_best_uninstalled_for_suggestion(line, &sdk);
     match row.ok()? {
         Some(row) => {
@@ -251,13 +206,11 @@ pub fn resolve_document_with_details(path: &str) -> Result<(Vec<String>, Vec<Str
 }
 pub fn self_test(report: impl Fn(&str)) -> Result<()> {
     report("live sdk list");
-    let live_sdk_text = run_sdk_list("java")?;
-    if !live_sdk_text.contains("Available Java Versions") {
-        return Err(err("self-test failed: live sdk list"));
-    }
-    let live_java_sdk = parse_sdk_list("java", &live_sdk_text);
-    if live_java_sdk.rows.is_empty() {
-        return Err(err("self-test failed: live java sdk parse"));
+    let platform = Platform::current()?;
+    let candidate = Candidate::new("java");
+    let sdk = broker::list_versions(&candidate, &platform).map_err(|e| err(e.to_string()))?;
+    if sdk.rows.is_empty() {
+        return Err(err("self-test failed: live java sdk list returned no rows"));
     }
     Ok(())
 }

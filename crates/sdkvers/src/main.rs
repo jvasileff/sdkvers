@@ -1,8 +1,8 @@
 use sdkvers::{
-    ConfigLineParser, Resolver, VersionParser, bootstrap_sdkvers_content, dump_config_line,
-    dump_document, dump_sdk_list, dump_version, dump_version_expr, find_sdkvers_path,
-    load_local_sdk_list, parse_document, parse_sdk_list, read_utf8_file,
-    resolve_document_with_details, run_sdk_list, self_test, suggest_install,
+    Candidate, ConfigLineParser, Platform, Resolver, VersionParser, bootstrap_sdkvers_content,
+    dump_config_line, dump_document, dump_sdk_list, dump_version, dump_version_expr,
+    find_sdkvers_path, load_local_sdk_list, parse_document, parse_sdk_list, read_utf8_file,
+    resolve_document_with_details, self_test, suggest_install,
 };
 use std::io::{Read, Write};
 use std::path::Path;
@@ -241,10 +241,13 @@ fn run_debug(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "parse-sdklist" => {
-            for (i, candidate) in args[1..].iter().enumerate() {
+            let platform = Platform::current().map_err(|e| e.0)?;
+            for (i, candidate_name) in args[1..].iter().enumerate() {
                 if i > 0 { println!(); }
-                let text = run_sdk_list(candidate).map_err(|e| e.0)?;
-                let node = parse_sdk_list(candidate, &text);
+                let candidate = Candidate::new(candidate_name);
+                let text = broker::list_versions_raw(&candidate, &platform)
+                    .map_err(|e| e.to_string())?;
+                let node = parse_sdk_list(candidate_name, &text);
                 print!("{}", dump_sdk_list(&node));
             }
             Ok(())

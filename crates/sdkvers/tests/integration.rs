@@ -1,5 +1,6 @@
 use sdkvers::*;
 use std::path::PathBuf;
+use types::Platform;
 
 #[test]
 #[ignore = "requires SDKMAN installation"]
@@ -32,34 +33,33 @@ fn resolves_installed_java_version() {
 }
 
 #[test]
-#[ignore = "requires SDKMAN installation and network; run to regenerate fixtures"]
+#[ignore = "requires network access; run to regenerate fixtures"]
 fn capture_sdk_list_fixtures() {
     let candidates = [
         "java", "gradle", "maven", "kotlin", "scala",
         "groovy", "ant", "springboot", "micronaut", "sbt",
     ];
+    let platform = Platform::current().unwrap();
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/sdk_list");
     std::fs::create_dir_all(&dir).unwrap();
-    for candidate in candidates {
-        match run_sdk_list(candidate) {
+    for candidate_name in candidates {
+        let candidate = Candidate::new(candidate_name);
+        match broker::list_versions_raw(&candidate, &platform) {
             Ok(text) => {
-                std::fs::write(dir.join(format!("{candidate}.txt")), &text).unwrap();
-                println!("captured {candidate}");
+                std::fs::write(dir.join(format!("{candidate_name}.txt")), &text).unwrap();
+                println!("captured {candidate_name}");
             }
-            Err(e) => eprintln!("skipping {candidate}: {e}"),
+            Err(e) => eprintln!("skipping {candidate_name}: {e}"),
         }
     }
 }
 
 #[test]
-#[ignore = "requires SDKMAN installation and network"]
-fn runs_live_sdk_list() {
-    let text = run_sdk_list("java").unwrap();
-    assert!(
-        text.contains("Available Java Versions"),
-        "unexpected sdk list output"
-    );
-    let sdk = parse_sdk_list("java", &text);
+#[ignore = "requires network access to SDKMAN API"]
+fn fetches_live_java_versions() {
+    let platform = Platform::current().unwrap();
+    let candidate = Candidate::new("java");
+    let sdk = broker::list_versions(&candidate, &platform).unwrap();
     assert!(!sdk.rows.is_empty(), "expected at least one row in live sdk list");
 }

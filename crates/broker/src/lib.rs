@@ -5,7 +5,7 @@ mod candidates;
 mod download;
 mod hooks;
 
-pub use candidates::{list_candidates, list_versions};
+pub use candidates::{list_candidates, list_versions, list_versions_raw};
 pub use download::{download_archive, DownloadedArchive};
 pub use hooks::{fetch_hook, FetchedHook};
 
