@@ -1,3 +1,4 @@
+use owo_colors::OwoColorize;
 use sdkvers::{
     Candidate, ConfigLineParser, Platform, Resolver, VersionParser,
     bootstrap_sdkvers_content, dump_config_line, dump_document, dump_sdk_list, dump_version,
@@ -7,6 +8,43 @@ use sdkvers::{
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
+
+/// Returns false if the environment unconditionally disables color.
+fn color_env_allows() -> bool {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    if std::env::var("TERM").as_deref() == Ok("dumb") {
+        return false;
+    }
+    true
+}
+
+/// Fallback color detection for direct binary invocation (not via shell function).
+/// When invoked through the shell function, stdout is always a pipe due to $()
+/// capture, so isatty returns false — but the shell function passes --color
+/// explicitly when appropriate.  For direct invocation there is no such wrapper,
+/// so isatty(stdout) gives the right answer.
+fn should_color() -> bool {
+    use std::io::IsTerminal;
+    color_env_allows() && std::io::stdout().is_terminal()
+}
+
+/// Parse and consume --stdout-is-tty from an arg list, returning the resolved
+/// use_color bool and the remaining args with that flag removed.
+fn parse_tty_flags(args: &[String]) -> (bool, Vec<String>) {
+    let mut stdout_is_tty = false;
+    let mut remaining = Vec::new();
+    for arg in args {
+        if arg.as_str() == "--stdout-is-tty" {
+            stdout_is_tty = true;
+        } else {
+            remaining.push(arg.clone());
+        }
+    }
+    let use_color = if stdout_is_tty { color_env_allows() } else { should_color() };
+    (use_color, remaining)
+}
 
 // ---------------------------------------------------------------------------
 // Shell-function output protocol
@@ -136,7 +174,12 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             if !message.is_empty() {
-                eprintln!("error: {message}");
+                use std::io::IsTerminal;
+                if color_env_allows() && std::io::stderr().is_terminal() {
+                    eprintln!("{} {message}", "error:".red());
+                } else {
+                    eprintln!("error: {message}");
+                }
             }
             ExitCode::from(1)
         }
@@ -309,10 +352,11 @@ fn run_internal(args: &[String]) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 fn run_fn(args: &[String]) -> Result<(), String> {
+    let (use_color, args) = parse_tty_flags(args);
     let uuid = generate_fn_uuid();
     match args.first().map(String::as_str) {
-        None => run_fn_resolve(&uuid),
-        Some("bootstrap") => run_fn_bootstrap(&args[1..], &uuid),
+        None => run_fn_resolve(&uuid, use_color),
+        Some("bootstrap") => run_fn_bootstrap(&args[1..], &uuid, use_color),
         Some("selfupdate") => run_fn_selfupdate(&args[1..]),
         Some("help") => {
             let mut out = FnOutput::new();
@@ -327,13 +371,17 @@ fn run_fn(args: &[String]) -> Result<(), String> {
     }
 }
 
-fn run_fn_resolve(uuid: &str) -> Result<(), String> {
+fn run_fn_resolve(uuid: &str, use_color: bool) -> Result<(), String> {
     let path = find_sdkvers_path(".").map_err(|e| e.0)?;
     let resolved = resolve_document_with_details(&path).map_err(|e| e.0)?;
 
     if !resolved.errors.is_empty() {
         for error in &resolved.errors {
-            eprintln!("{error}");
+            if use_color {
+                eprintln!("{}", colorize_error(error));
+            } else {
+                eprintln!("{error}");
+            }
         }
         return Err(String::new());
     }
@@ -344,14 +392,18 @@ fn run_fn_resolve(uuid: &str) -> Result<(), String> {
         out.eval.push('\n');
     }
     for msg in &resolved.messages {
-        out.stdout.push_str(msg);
+        if use_color {
+            out.stdout.push_str(&msg.green().to_string());
+        } else {
+            out.stdout.push_str(msg);
+        }
         out.stdout.push('\n');
     }
     out.write(uuid);
     Ok(())
 }
 
-fn run_fn_bootstrap(args: &[String], uuid: &str) -> Result<(), String> {
+fn run_fn_bootstrap(args: &[String], uuid: &str, use_color: bool) -> Result<(), String> {
     let dir = match args.first().map(String::as_str) {
         None => ".",
         Some("--directory") => match args.get(1).map(String::as_str) {
@@ -375,10 +427,28 @@ fn run_fn_bootstrap(args: &[String], uuid: &str) -> Result<(), String> {
     std::fs::write(&target, &content)
         .map_err(|e| format!("could not write .sdkvers: {e}"))?;
 
+    let msg = format!("wrote {}", target.display());
     let mut out = FnOutput::new();
-    out.stdout = format!("wrote {}\n", target.display());
+    out.stdout = if use_color {
+        format!("{}\n", msg.green())
+    } else {
+        format!("{msg}\n")
+    };
     out.write(uuid);
     Ok(())
+}
+
+fn colorize_error(error: &str) -> String {
+    // The hint, if present, is appended as "\nhint: ..." by the lib layer.
+    // Color the error portion red and the hint portion yellow.
+    match error.find("\nhint: ") {
+        Some(idx) => format!(
+            "{}{}",
+            (&error[..idx]).red(),
+            (&error[idx..]).yellow(),
+        ),
+        None => error.red().to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------

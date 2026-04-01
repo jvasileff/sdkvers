@@ -16,7 +16,15 @@ sdkvers() {
   # Run the shell-function backend.  All output is structured three-section
   # format (eval / stdout / stderr) separated by a UUID sentinel line.
   # Parsing is delegated back to the binary via the extract subcommand.
-  sdkvers_output=$("$sdkvers_resolver" sdkvers "$@")
+  #
+  # Pass --color when this shell function's stdout is a terminal.  The binary's
+  # own stdout is always a pipe (due to $() capture), so it cannot detect the
+  # tty itself; the shell function is the authoritative source of that information.
+  if [ -t 1 ]; then
+    sdkvers_output=$("$sdkvers_resolver" sdkvers --stdout-is-tty "$@")
+  else
+    sdkvers_output=$("$sdkvers_resolver" sdkvers "$@")
+  fi
   sdkvers_exit=$?
 
   # Some subcommands (e.g. selfupdate) produce no stdout intentionally and
