@@ -19,3 +19,4 @@ store = { path = "../store" }
 broker = { path = "../broker" }
 ops = { path = "../ops" }
 owo-colors = "4"
+pathdiff = "0.2"

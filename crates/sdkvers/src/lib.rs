@@ -178,7 +178,17 @@ fn find_best_uninstalled_for_suggestion(
     Resolver.find_best_uninstalled(line, sdk)
 }
 
+fn relative_path(path: &str) -> String {
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Some(rel) = pathdiff::diff_paths(path, &cwd) {
+            return rel.to_string_lossy().into_owned();
+        }
+    }
+    path.to_owned()
+}
+
 pub fn resolve_document_with_details(path: &str) -> Result<ResolveOutput> {
+    let display_path = relative_path(path);
     let document = parse_document(&read_utf8_file(path)?);
     let mut cache: HashMap<String, SdkListNode> = HashMap::new();
     let resolver = Resolver;
@@ -191,7 +201,7 @@ pub fn resolve_document_with_details(path: &str) -> Result<ResolveOutput> {
         let config = match ConfigLineParser::new(&entry.source, entry.line_number).parse_line() {
             Ok(c) => c,
             Err(e) => {
-                output.errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path));
+                output.errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, display_path));
                 continue;
             }
         };
@@ -203,7 +213,7 @@ pub fn resolve_document_with_details(path: &str) -> Result<ResolveOutput> {
                     parsed
                 }
                 Err(e) => {
-                    output.errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path));
+                    output.errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, display_path));
                     continue;
                 }
             },
@@ -221,12 +231,12 @@ pub fn resolve_document_with_details(path: &str) -> Result<ResolveOutput> {
                     }
                     Err(e) => {
                         output.errors.push(format!("error: could not activate {} {}: {} (line {} in {})",
-                            row.candidate, row.target, e, entry.line_number, path));
+                            row.candidate, row.target, e, entry.line_number, display_path));
                     }
                 }
             }
             Err(e) => {
-                let mut msg = format!("error: {} (line {} in {})", e.0, entry.line_number, path);
+                let mut msg = format!("error: {} (line {} in {})", e.0, entry.line_number, display_path);
                 if let Some(hint) = suggest_install(&config) {
                     msg.push_str(&format!("\nhint: {hint}"));
                 }
