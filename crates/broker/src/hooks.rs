@@ -5,6 +5,9 @@ use crate::{Error, client};
 /// A fetched hook script with its raw text and computed fingerprint.
 pub struct FetchedHook {
     pub raw: String,
+    /// The normalized form of the hook used for fingerprinting (useful for diagnosing
+    /// unknown hashes).
+    pub normalized: String,
     pub fingerprint: HookFingerprint,
 }
 
@@ -33,25 +36,20 @@ pub fn fetch_hook(
 
     let raw = client::fetch(&path)?;
 
-    let fingerprint = if raw.trim().is_empty() {
-        // Empty hook — no special handling needed.
-        HookFingerprint::DefaultZip
+    let (fingerprint, normalized) = if raw.trim().is_empty() {
+        (HookFingerprint::DefaultZip, String::new())
     } else {
-        fingerprint(candidate, identifier, &raw)
+        let norm = normalize(candidate, identifier, &raw);
+        let fp = classify(&norm, &raw);
+        (fp, norm)
     };
 
-    Ok(FetchedHook { raw, fingerprint })
+    Ok(FetchedHook { raw, normalized, fingerprint })
 }
 
-/// Normalize a hook script and compute its MD5 fingerprint.
-/// Normalization substitutes variable parts (identifier, candidate name, platform,
-/// vendor, JMC-specific paths) with fixed placeholders before hashing.
+/// Normalize a hook script by substituting variable parts with fixed placeholders.
 /// See SDKALT-HOOKS.md for the full normalization specification.
-fn fingerprint(
-    candidate: &Candidate,
-    identifier: &Identifier,
-    raw: &str,
-) -> HookFingerprint {
+fn normalize(candidate: &Candidate, identifier: &Identifier, raw: &str) -> String {
     let vendor = identifier.as_str()
         .rfind('-')
         .map(|pos| &identifier.as_str()[pos + 1..])
@@ -78,8 +76,11 @@ fn fingerprint(
         .replace(&format!("JMC {vendor}"), "JMC VENDOR");
 
     // Normalize JMC-specific lines.
-    let normalized = normalize_jmc_lines(&normalized);
+    normalize_jmc_lines(&normalized)
+}
 
+/// Classify a normalized hook script by its MD5 hash.
+fn classify(normalized: &str, raw: &str) -> HookFingerprint {
     let hash = format!("{:x}", md5::compute(normalized.as_bytes()));
 
     match hash.as_str() {
@@ -100,8 +101,10 @@ fn fingerprint(
 }
 
 /// Replace `executable_binary` and `containing_folder` lines with placeholders.
+/// Preserves the trailing newline of the input, since Rust's `.lines()` strips it
+/// and the reference hashes were computed from files that include it.
 fn normalize_jmc_lines(s: &str) -> String {
-    s.lines()
+    let mut result = s.lines()
         .map(|line| {
             if line.trim_start().starts_with("local executable_binary=") {
                 "    local executable_binary=\"EXECUTABLE\""
@@ -112,7 +115,11 @@ fn normalize_jmc_lines(s: &str) -> String {
             }
         })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    if s.ends_with('\n') {
+        result.push('\n');
+    }
+    result
 }
 
 /// Extract the raw executable_binary value from a JMC hook script.

@@ -75,8 +75,8 @@ fn fetch_hook_java_returns_known_fingerprint() {
     let hook = broker::fetch_hook(&candidate, &identifier, &platform).unwrap();
     assert!(
         !matches!(hook.fingerprint, HookFingerprint::Unknown { .. }),
-        "unrecognised hook fingerprint for {} {}: {:?}",
-        candidate, identifier, hook.fingerprint
+        "unrecognised hook fingerprint for {} {}: {:?}\n\n=== RAW HOOK ===\n{}\n\n=== NORMALIZED ===\n{}",
+        candidate, identifier, hook.fingerprint, hook.raw, hook.normalized
     );
 }
 
