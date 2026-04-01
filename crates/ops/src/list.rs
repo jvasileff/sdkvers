@@ -1,4 +1,4 @@
-use types::{Candidate, Platform, SdkListRow};
+use types::{Candidate, Identifier, Platform, SdkListRow};
 
 use crate::Error;
 
@@ -8,6 +8,11 @@ pub struct ListEntry {
     pub row: SdkListRow,
     pub installed: bool,
     pub is_current: bool,
+}
+
+/// Return the currently active version for every candidate that has one set.
+pub fn get_all_current() -> Result<Vec<(Candidate, Identifier)>, Error> {
+    Ok(store::get_all_current()?)
 }
 
 /// Return all candidates that are available remotely via the broker API.

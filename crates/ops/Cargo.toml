@@ -8,3 +8,6 @@ types = { path = "../types" }
 broker = { path = "../broker" }
 store = { path = "../store" }
 thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

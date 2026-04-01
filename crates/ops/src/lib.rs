@@ -10,7 +10,7 @@ mod use_;
 pub use current::current;
 pub use default::set_default;
 pub use install::install;
-pub use list::{ListEntry, list, list_installed, list_local_candidates, list_remote_candidates};
+pub use list::{ListEntry, get_all_current, list, list_installed, list_local_candidates, list_remote_candidates};
 pub use uninstall::uninstall;
 pub use use_::use_version;
 
