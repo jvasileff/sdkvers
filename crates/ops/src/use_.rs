@@ -15,5 +15,5 @@ pub fn use_version(candidate: &Candidate, identifier: &Identifier) -> Result<Vec
             identifier: identifier.to_string(),
         }.into());
     }
-    Ok(shell_activation_commands(candidate, identifier))
+    Ok(shell_activation_commands(candidate, identifier)?)
 }

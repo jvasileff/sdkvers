@@ -251,6 +251,73 @@ fn list_local_candidates_empty_when_nothing_installed() {
     drop(sdk);
 }
 
+// ── shell_activation_commands / PATH manipulation ─────────────────────────────
+
+#[test]
+fn path_activation_prepends_bin_when_candidate_not_in_path() {
+    let sdk = TestSdkman::new();
+    let sdkman_dir = sdk.dir.to_str().unwrap();
+
+    std::env::set_var("PATH", "/usr/bin:/usr/local/bin");
+    let cmds = ops::shell_activation_commands(&Candidate::new("java"), &Identifier::new("21.0.7-tem")).unwrap();
+    let path_cmd = cmds.iter().find(|c| c.starts_with("export PATH=")).unwrap();
+
+    let expected = format!("export PATH=\"{sdkman_dir}/candidates/java/21.0.7-tem/bin:/usr/bin:/usr/local/bin\"");
+    assert_eq!(path_cmd, &expected);
+    drop(sdk);
+}
+
+#[test]
+fn path_activation_replaces_existing_version_in_path() {
+    let sdk = TestSdkman::new();
+    let sdkman_dir = sdk.dir.to_str().unwrap();
+
+    std::env::set_var("PATH", format!("{sdkman_dir}/candidates/java/21.0.7-tem/bin:/usr/bin"));
+    let cmds = ops::shell_activation_commands(&Candidate::new("java"), &Identifier::new("23.0.1-graalce")).unwrap();
+    let path_cmd = cmds.iter().find(|c| c.starts_with("export PATH=")).unwrap();
+
+    let expected = format!("export PATH=\"{sdkman_dir}/candidates/java/23.0.1-graalce/bin:/usr/bin\"");
+    assert_eq!(path_cmd, &expected);
+    drop(sdk);
+}
+
+#[test]
+fn path_activation_works_on_second_switch() {
+    // Reproduce the reported bug: switching java a second time must not corrupt PATH.
+    let sdk = TestSdkman::new();
+    let sdkman_dir = sdk.dir.to_str().unwrap();
+
+    // First switch: java not in PATH → prepend.
+    std::env::set_var("PATH", "/usr/bin:/usr/local/bin");
+    let cmds = ops::shell_activation_commands(&Candidate::new("java"), &Identifier::new("25.0.1-graalce")).unwrap();
+    let after_first = cmds.iter().find(|c| c.starts_with("export PATH=")).unwrap();
+    let expected_first = format!("export PATH=\"{sdkman_dir}/candidates/java/25.0.1-graalce/bin:/usr/bin:/usr/local/bin\"");
+    assert_eq!(after_first, &expected_first);
+
+    // Second switch: java 25 is now in PATH → replace with 23.
+    std::env::set_var("PATH", format!("{sdkman_dir}/candidates/java/25.0.1-graalce/bin:/usr/bin:/usr/local/bin"));
+    let cmds = ops::shell_activation_commands(&Candidate::new("java"), &Identifier::new("23.0.1-graalce")).unwrap();
+    let after_second = cmds.iter().find(|c| c.starts_with("export PATH=")).unwrap();
+    let expected_second = format!("export PATH=\"{sdkman_dir}/candidates/java/23.0.1-graalce/bin:/usr/bin:/usr/local/bin\"");
+    assert_eq!(after_second, &expected_second);
+
+    drop(sdk);
+}
+
+#[test]
+fn path_activation_replaces_current_symlink_entry() {
+    let sdk = TestSdkman::new();
+    let sdkman_dir = sdk.dir.to_str().unwrap();
+
+    std::env::set_var("PATH", format!("{sdkman_dir}/candidates/java/current/bin:/usr/bin"));
+    let cmds = ops::shell_activation_commands(&Candidate::new("java"), &Identifier::new("21.0.7-tem")).unwrap();
+    let path_cmd = cmds.iter().find(|c| c.starts_with("export PATH=")).unwrap();
+
+    let expected = format!("export PATH=\"{sdkman_dir}/candidates/java/21.0.7-tem/bin:/usr/bin\"");
+    assert_eq!(path_cmd, &expected);
+    drop(sdk);
+}
+
 // ── list_remote_candidates (network) ─────────────────────────────────────────
 
 #[test]
