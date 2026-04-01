@@ -598,6 +598,43 @@ mod tests {
     }
 
     #[test]
+    fn non_java_bracket_with_vendor_suffix_is_error() {
+        // A trailing -suffix after a bracket expression is vendor syntax, which is
+        // not supported for non-Java candidates.
+        assert!(ConfigLineParser::new("gradle = [8,9)-graalce", 1).parse_line().is_err());
+        let err = ConfigLineParser::new("gradle = [8,9)-graalce", 1)
+            .parse_line()
+            .unwrap_err();
+        assert!(
+            err.0.contains("vendor specification not allowed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn non_java_tilde_with_mixed_version_is_error() {
+        // ~8-graalce: the version 8-graalce is not pure-numeric, so tilde rejects it.
+        // (Analogous to ~26.ea for java — tilde only accepts pure-numeric versions.)
+        assert!(ConfigLineParser::new("gradle = ~8-graalce", 1).parse_line().is_err());
+    }
+
+    #[test]
+    fn non_java_bracket_with_dash_in_bound() {
+        // A '-' inside a range bound is a version separator, not a vendor delimiter.
+        // gradle = [8.7.0-rc,9) should parse with lower bound "8.7.0-rc".
+        let line = ConfigLineParser::new("gradle = [8.7.0-rc,9)", 1)
+            .parse_line()
+            .unwrap();
+        assert!(line.vendor.is_none());
+        if let VersionExprNode::Range { lower, upper, .. } = &line.expr {
+            assert_eq!(lower.as_ref().unwrap().source, "8.7.0-rc");
+            assert_eq!(upper.as_ref().unwrap().source, "9");
+        } else {
+            panic!("expected Range");
+        }
+    }
+
+    #[test]
     fn config_line_missing_equals_is_error() {
         assert!(ConfigLineParser::new("java 21", 1).parse_line().is_err());
     }
@@ -869,7 +906,6 @@ mod tests {
         assert_eq!(matched[0].dist.as_deref(), Some("graalce"));
     }
 
-    #[test]
     #[test]
     fn vendor_match_is_case_sensitive() {
         let resolver = Resolver;

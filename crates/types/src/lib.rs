@@ -153,11 +153,21 @@ pub struct ResolvedRow {
 pub struct VersionParser<'a> {
     source: &'a str,
     index: usize,
+    support_vendor: bool,
 }
 
 impl<'a> VersionParser<'a> {
     pub fn new(source: &'a str) -> Self {
-        Self { source, index: 0 }
+        Self { source, index: 0, support_vendor: false }
+    }
+
+    /// Enables vendor-suffix awareness. When set, a trailing `-<lowercase>` after a
+    /// bracket expression is treated as a vendor (extracted or accepted) rather than
+    /// "unexpected trailing input". For non-Java candidates leave this unset so that
+    /// the parser produces a specific "vendor not allowed" error instead.
+    pub fn support_vendor(mut self) -> Self {
+        self.support_vendor = true;
+        self
     }
 
     pub fn parse_version(mut self) -> Result<VersionNode> {
@@ -284,7 +294,7 @@ impl<'a> VersionParser<'a> {
                 return Err(self.error("invalid exact expression"));
             }
             if !self.at_end() {
-                return Err(self.error("unexpected trailing input"));
+                return Err(self.trailing_input_error());
             }
             let source = self.source[start_index..self.index].to_string();
             return Ok(VersionExprNode::Exact {
@@ -309,7 +319,7 @@ impl<'a> VersionParser<'a> {
         self.advance()?;
 
         if !self.at_end() {
-            return Err(self.error("unexpected trailing input"));
+            return Err(self.trailing_input_error());
         }
 
         Ok(VersionExprNode::Range {
@@ -456,6 +466,27 @@ impl<'a> VersionParser<'a> {
 
     fn at_end(&self) -> bool {
         self.index >= self.source.len()
+    }
+
+    // Returns true when the remaining input looks like a vendor suffix: a single
+    // '-' followed by one or more lowercase ASCII letters to end-of-string.
+    fn remaining_is_vendor_suffix(&self) -> bool {
+        let remaining = &self.source[self.index..];
+        if let Some(suffix) = remaining.strip_prefix('-') {
+            !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_lowercase())
+        } else {
+            false
+        }
+    }
+
+    // Produces the appropriate error for unexpected trailing input after a bracket
+    // expression. When vendor support is disabled and the trailing input looks like
+    // a vendor suffix, emits a specific diagnostic instead of the generic message.
+    fn trailing_input_error(&self) -> Error {
+        if !self.support_vendor && self.remaining_is_vendor_suffix() {
+            return self.error("vendor specification not allowed for non-Java candidates");
+        }
+        self.error("unexpected trailing input")
     }
 
     fn error(&self, message: impl fmt::Display) -> Error {
