@@ -127,3 +127,5 @@ For full details on version comparison and range semantics, see [SPEC.md](SPEC.m
 ## Authorship
 
 The code in this project was mostly written by AI, with heavy design collaboration with the author.
+
+This project is licensed under the terms of the MIT license.

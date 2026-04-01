@@ -2,6 +2,8 @@
 name = "sdkvers"
 version = "1.0.1-dev"
 edition = "2024"
+authors = ["John Vasileff"]
+license = "MIT"
 
 [lib]
 name = "sdkvers"
