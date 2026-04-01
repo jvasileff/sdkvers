@@ -98,12 +98,26 @@ pub fn find_sdkvers_path(start_path: &str) -> Result<String> {
     }
 }
 
+/// Output from resolving a `.sdkvers` document.
+pub struct ResolveOutput {
+    /// Shell commands to evaluate (env var exports, e.g. `export JAVA_HOME=...`).
+    pub eval: Vec<String>,
+    /// User-facing messages reporting which versions were activated.
+    pub messages: Vec<String>,
+    /// Error messages for lines that could not be resolved.
+    pub errors: Vec<String>,
+}
+
 pub fn resolve_document(path: &str) -> Result<Vec<String>> {
-    let (commands, errors) = resolve_document_with_details(path)?;
-    if errors.is_empty() {
-        Ok(commands)
+    let output = resolve_document_with_details(path)?;
+    if output.errors.is_empty() {
+        Ok(output.eval)
     } else {
-        Err(err(format!("{}\n{}", commands.join("\n"), errors.join("\n"))))
+        Err(err(format!(
+            "{}\n{}",
+            output.eval.join("\n"),
+            output.errors.join("\n")
+        )))
     }
 }
 
@@ -164,17 +178,20 @@ fn find_best_uninstalled_for_suggestion(
     Resolver.find_best_uninstalled(line, sdk)
 }
 
-pub fn resolve_document_with_details(path: &str) -> Result<(Vec<String>, Vec<String>)> {
+pub fn resolve_document_with_details(path: &str) -> Result<ResolveOutput> {
     let document = parse_document(&read_utf8_file(path)?);
     let mut cache: HashMap<String, SdkListNode> = HashMap::new();
     let resolver = Resolver;
-    let mut commands = Vec::new();
-    let mut errors = Vec::new();
+    let mut output = ResolveOutput {
+        eval: Vec::new(),
+        messages: Vec::new(),
+        errors: Vec::new(),
+    };
     for entry in document.entries {
         let config = match ConfigLineParser::new(&entry.source, entry.line_number).parse_line() {
             Ok(c) => c,
             Err(e) => {
-                errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path));
+                output.errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path));
                 continue;
             }
         };
@@ -186,23 +203,38 @@ pub fn resolve_document_with_details(path: &str) -> Result<(Vec<String>, Vec<Str
                     parsed
                 }
                 Err(e) => {
-                    errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path));
+                    output.errors.push(format!("error: {} (line {} in {})", e.0, entry.line_number, path));
                     continue;
                 }
             },
         };
         match resolver.resolve_line(&config, &sdk_list) {
-            Ok(row) => commands.push(format!("sdk use {} {}", row.candidate, row.target)),
+            Ok(row) => {
+                let candidate = Candidate::new(&row.candidate);
+                let identifier = Identifier::new(&row.target);
+                match ops::use_version(&candidate, &identifier) {
+                    Ok(cmds) => {
+                        output.eval.extend(cmds);
+                        output.messages.push(format!(
+                            "Using {} version {} in this shell.", row.candidate, row.target
+                        ));
+                    }
+                    Err(e) => {
+                        output.errors.push(format!("error: could not activate {} {}: {} (line {} in {})",
+                            row.candidate, row.target, e, entry.line_number, path));
+                    }
+                }
+            }
             Err(e) => {
                 let mut msg = format!("error: {} (line {} in {})", e.0, entry.line_number, path);
                 if let Some(hint) = suggest_install(&config) {
                     msg.push_str(&format!("\nhint: {hint}"));
                 }
-                errors.push(msg);
+                output.errors.push(msg);
             }
         }
     }
-    Ok((commands, errors))
+    Ok(output)
 }
 pub fn self_test(report: impl Fn(&str)) -> Result<()> {
     report("live sdk list");

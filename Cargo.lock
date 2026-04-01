@@ -919,6 +919,7 @@ name = "sdkvers"
 version = "1.1.0"
 dependencies = [
  "broker",
+ "ops",
  "store",
  "types",
 ]

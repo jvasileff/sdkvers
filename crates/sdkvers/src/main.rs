@@ -1,8 +1,8 @@
 use sdkvers::{
-    Candidate, ConfigLineParser, Platform, Resolver, VersionParser, bootstrap_sdkvers_content,
-    dump_config_line, dump_document, dump_sdk_list, dump_version, dump_version_expr,
-    find_sdkvers_path, load_local_sdk_list, parse_document, parse_sdk_list, read_utf8_file,
-    resolve_document_with_details, self_test, suggest_install,
+    Candidate, ConfigLineParser, Platform, Resolver, VersionParser,
+    bootstrap_sdkvers_content, dump_config_line, dump_document, dump_sdk_list, dump_version,
+    dump_version_expr, find_sdkvers_path, load_local_sdk_list, parse_document, parse_sdk_list,
+    read_utf8_file, resolve_document_with_details, self_test, suggest_install,
 };
 use std::io::{Read, Write};
 use std::path::Path;
@@ -259,7 +259,7 @@ fn run_debug(args: &[String]) -> Result<(), String> {
                 let line = ConfigLineParser::new(line_text, 1).parse_line().map_err(|e| e.0)?;
                 let sdk = load_local_sdk_list(&line.candidate).map_err(|e| e.0)?;
                 match resolver.resolve_line(&line, &sdk) {
-                    Ok(row) => println!("sdk use {} {}", row.candidate, row.target),
+                    Ok(row) => println!("{} {}", row.candidate, row.target),
                     Err(e) => {
                         if let Some(hint) = suggest_install(&line) {
                             eprintln!("hint: {hint}");
@@ -272,10 +272,10 @@ fn run_debug(args: &[String]) -> Result<(), String> {
         }
         "resolve-file" => {
             for path in &args[1..] {
-                let (commands, errors) = resolve_document_with_details(path).map_err(|e| e.0)?;
-                for command in commands { println!("{command}"); }
-                if !errors.is_empty() {
-                    for error in errors { eprintln!("{error}"); }
+                let out = resolve_document_with_details(path).map_err(|e| e.0)?;
+                for msg in &out.messages { println!("{msg}"); }
+                if !out.errors.is_empty() {
+                    for error in &out.errors { eprintln!("{error}"); }
                     return Err("resolve-file failed".to_string());
                 }
             }
@@ -284,10 +284,10 @@ fn run_debug(args: &[String]) -> Result<(), String> {
         "resolve-project" => {
             let start_path = if args.len() < 2 { "." } else { args[1].as_str() };
             let path = find_sdkvers_path(start_path).map_err(|e| e.0)?;
-            let (commands, errors) = resolve_document_with_details(&path).map_err(|e| e.0)?;
-            for command in commands { println!("{command}"); }
-            if !errors.is_empty() {
-                for error in errors { eprintln!("{error}"); }
+            let out = resolve_document_with_details(&path).map_err(|e| e.0)?;
+            for msg in &out.messages { println!("{msg}"); }
+            if !out.errors.is_empty() {
+                for error in &out.errors { eprintln!("{error}"); }
                 return Err("resolve-project failed".to_string());
             }
             Ok(())
@@ -329,19 +329,23 @@ fn run_fn(args: &[String]) -> Result<(), String> {
 
 fn run_fn_resolve(uuid: &str) -> Result<(), String> {
     let path = find_sdkvers_path(".").map_err(|e| e.0)?;
-    let (commands, errors) = resolve_document_with_details(&path).map_err(|e| e.0)?;
+    let resolved = resolve_document_with_details(&path).map_err(|e| e.0)?;
 
-    if !errors.is_empty() {
-        for error in &errors {
+    if !resolved.errors.is_empty() {
+        for error in &resolved.errors {
             eprintln!("{error}");
         }
         return Err(String::new());
     }
 
     let mut out = FnOutput::new();
-    for cmd in &commands {
+    for cmd in &resolved.eval {
         out.eval.push_str(cmd);
         out.eval.push('\n');
+    }
+    for msg in &resolved.messages {
+        out.stdout.push_str(msg);
+        out.stdout.push('\n');
     }
     out.write(uuid);
     Ok(())

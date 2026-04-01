@@ -1,11 +1,19 @@
 use types::{Candidate, Identifier};
 
-use crate::Error;
+use crate::{Error, activate::shell_activation_commands};
 
-/// Set the current version for a candidate in the current shell session.
-/// The version must already be installed. Updates the `current` symlink.
-/// The caller (CLI) is responsible for emitting the eval-able env-var output.
-pub fn use_version(candidate: &Candidate, identifier: &Identifier) -> Result<(), Error> {
-    store::set_current(candidate, identifier)?;
-    Ok(())
+/// Activate a specific version of a candidate in the current shell session.
+/// The version must already be installed.
+///
+/// Returns shell commands suitable for `eval` that update `<CANDIDATE>_HOME`
+/// and replace the candidate's entry in `PATH`. Does not touch the `current`
+/// symlink — use `set_default` for persistent changes.
+pub fn use_version(candidate: &Candidate, identifier: &Identifier) -> Result<Vec<String>, Error> {
+    if !store::version_path(candidate, identifier)?.exists() {
+        return Err(store::Error::VersionNotInstalled {
+            candidate: candidate.to_string(),
+            identifier: identifier.to_string(),
+        }.into());
+    }
+    Ok(shell_activation_commands(candidate, identifier))
 }

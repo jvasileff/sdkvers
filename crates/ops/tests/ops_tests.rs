@@ -81,7 +81,24 @@ fn current_returns_active_identifier() {
 // ── use_version ───────────────────────────────────────────────────────────────
 
 #[test]
-fn use_version_sets_current() {
+fn use_version_returns_shell_activation_commands() {
+    let sdk = TestSdkman::new();
+    sdk.add_version("gradle", "8.5");
+
+    let cand = Candidate::new("gradle");
+    let ident = Identifier::new("8.5");
+    let cmds = ops::use_version(&cand, &ident).unwrap();
+
+    assert!(!cmds.is_empty());
+    let joined = cmds.join("\n");
+    assert!(joined.contains("GRADLE_HOME"), "should set GRADLE_HOME: {joined}");
+    assert!(joined.contains("gradle/8.5"), "should reference version: {joined}");
+    assert!(joined.contains("PATH"), "should update PATH: {joined}");
+    drop(sdk);
+}
+
+#[test]
+fn use_version_does_not_change_current_symlink() {
     let sdk = TestSdkman::new();
     sdk.add_version("gradle", "8.5");
     sdk.add_version("gradle", "8.4");
@@ -91,8 +108,9 @@ fn use_version_sets_current() {
     let ident = Identifier::new("8.5");
     ops::use_version(&cand, &ident).unwrap();
 
+    // Symlink must remain pointing at 8.4, not 8.5.
     let current = ops::current(&cand).unwrap();
-    assert_eq!(current.as_ref().map(|i| i.as_str()), Some("8.5"));
+    assert_eq!(current.as_ref().map(|i| i.as_str()), Some("8.4"));
     drop(sdk);
 }
 

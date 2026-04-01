@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+mod activate;
 mod current;
 mod default;
 mod install;
@@ -7,6 +8,7 @@ mod list;
 mod uninstall;
 mod use_;
 
+pub use activate::shell_activation_commands;
 pub use current::current;
 pub use default::set_default;
 pub use install::install;

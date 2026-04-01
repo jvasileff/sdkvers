@@ -17,3 +17,4 @@ path = "src/main.rs"
 types = { path = "../types" }
 store = { path = "../store" }
 broker = { path = "../broker" }
+ops = { path = "../ops" }
