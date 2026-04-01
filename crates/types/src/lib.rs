@@ -1385,7 +1385,7 @@ impl Identifier {
     /// For Java, the suffix after the last '-' (if all-alpha) is the vendor.
     pub fn parse(candidate: &Candidate, raw: &str) -> Result<ParsedIdentifier> {
         if raw.is_empty() {
-            return Err(err(format!("empty identifier")));
+            return Err(err("empty identifier".to_string()));
         }
         let (version_str, vendor) = if candidate.as_str() == "java" {
             if let Some(pos) = raw.rfind('-') {

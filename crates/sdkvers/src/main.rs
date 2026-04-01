@@ -108,7 +108,7 @@ impl FnOutput {
 
     fn write(&self, uuid: &str) {
         let mut out = std::io::stdout();
-        let _ = write!(out, "{uuid}\n");
+        let _ = writeln!(out, "{uuid}");
         let _ = out.write_all(qp_encode(self.eval.as_bytes()).as_bytes());
         let _ = write!(out, "\n{uuid}\n");
         let _ = out.write_all(qp_encode(self.stdout.as_bytes()).as_bytes());
@@ -264,7 +264,7 @@ fn run_debug(args: &[String]) -> Result<(), String> {
         }
         "parse-sdkfile" => {
             let inputs = &args[1..];
-            if inputs.len() < 2 || inputs.len() % 2 != 0 {
+            if inputs.len() < 2 || !inputs.len().is_multiple_of(2) {
                 return Err(
                     "usage: sdkvers-resolve debug parse-sdkfile <candidate> <path> [<candidate> <path> ...]"
                         .to_string(),
@@ -778,7 +778,7 @@ fn qp_encode(data: &[u8]) -> String {
         let next = data.get(i + 1).copied();
         // Determine the encoded form of this byte.
         let encoded = if b == b'=' {
-            format!("=3D")
+            "=3D".to_string()
         } else if (b == b' ' || b == b'\t') && (next == Some(b'\n') || next.is_none()) {
             format!("={:02X}", b)  // trailing whitespace must be encoded
         } else if b == b' ' || b == b'\t' || (0x21..=0x7E).contains(&b) {

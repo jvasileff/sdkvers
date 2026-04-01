@@ -179,11 +179,10 @@ fn find_best_uninstalled_for_suggestion(
 }
 
 fn relative_path(path: &str) -> String {
-    if let Ok(cwd) = std::env::current_dir() {
-        if let Some(rel) = pathdiff::diff_paths(path, &cwd) {
+    if let Ok(cwd) = std::env::current_dir()
+        && let Some(rel) = pathdiff::diff_paths(path, &cwd) {
             return rel.to_string_lossy().into_owned();
         }
-    }
     path.to_owned()
 }
 

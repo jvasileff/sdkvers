@@ -324,7 +324,7 @@ fn leading_dir_zip(zip: &mut zip::ZipArchive<std::fs::File>) -> Option<PathBuf> 
                 let first = p.components().next()?.as_os_str().to_owned();
                 match &prefix {
                     None => prefix = Some(PathBuf::from(&first)),
-                    Some(existing) if existing.as_os_str() != &first => return None,
+                    Some(existing) if existing.as_os_str() != first => return None,
                     _ => {}
                 }
             }
